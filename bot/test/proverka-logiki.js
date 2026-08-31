@@ -13,6 +13,13 @@ global.Utilities = {
   base64Encode: b => Buffer.from(b).toString('base64')
 };
 global.Logger = { log: () => {} };
+const svoystvaProekta = {};
+global.PropertiesService = {
+  getScriptProperties: () => ({
+    getProperty: k => (k in svoystvaProekta ? svoystvaProekta[k] : null),
+    setProperty: (k, v) => { svoystvaProekta[k] = v; }
+  })
+};
 global.Session = { getScriptTimeZone: () => 'Asia/Krasnoyarsk' };
 
 class Sheet {
@@ -171,6 +178,23 @@ sheets.forEach(x => { x.rows = []; });
 const pusto = svodka(true);
 eq('пустая таблица не падает', pusto.includes('ничего срочного'), true);
 
+// --- Откуда берутся ключи ---
+eq('пока ничего не задано — пусто', [tokenBota(), kluchModeli(), moyChat()], ['', '', '']);
+eq('заглушки из кода за значения не считаются', nastroyka('НЕТУ', 'СЮДА_КЛЮЧ_GEMINI'), '');
+eq('настоящее значение из кода подхватывается', nastroyka('НЕТУ', 'AIzaИзКода'), 'AIzaИзКода');
+
+svoystvaProekta['BOT_TOKEN'] = '  7712:AAF  ';
+svoystvaProekta['GEMINI_KEY'] = 'AIzaИзХранилища';
+svoystvaProekta['MY_CHAT_ID'] = '284736591';
+eq('хранилище читается и подрезается по краям', tokenBota(), '7712:AAF');
+eq('ключ из хранилища', kluchModeli(), 'AIzaИзХранилища');
+eq('номер из хранилища', moyChat(), '284736591');
+eq('хранилище главнее кода', nastroyka('GEMINI_KEY', 'AIzaИзКода'), 'AIzaИзХранилища');
+
+eq('затемнение оставляет края', zatemnit('AIzaSyABCDEFGH1234'), 'AIza…1234');
+eq('короткое затемняется целиком', zatemnit('abc'), '••••');
+eq('затемнение пустого не падает', zatemnit(''), '••••');
+
 // --- Обмен с Google ---
 // Подменяем сеть: запоминаем, что ушло, и отдаём заготовленный ответ.
 let poslednii = null, otvetSeti = null;
@@ -191,7 +215,7 @@ otvetSeti = { kod: 200, telo: JSON.stringify({
 eq('gemini: читает ответ', gemini('инструкция', [{ text: 'привет' }], 30, false), 'готов');
 eq('gemini: адрес с моделью', poslednii.url.endsWith('/models/' + MODEL + ':generateContent'), true);
 eq('gemini: ключ уходит заголовком, не в адресе',
-   [poslednii.opts.headers['x-goog-api-key'] === GEMINI_KEY, poslednii.url.indexOf('key=') >= 0],
+   [poslednii.opts.headers['x-goog-api-key'] === kluchModeli(), poslednii.url.indexOf('key=') >= 0],
    [true, false]);
 eq('gemini: системная инструкция на месте', poslednii.body.system_instruction.parts[0].text, 'инструкция');
 eq('gemini: без json-режима формат не требуем',

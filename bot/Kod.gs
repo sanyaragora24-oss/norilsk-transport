@@ -19,8 +19,13 @@
  */
 
 /* ══════════════════════════════════════════════════════════════════
-   1. ТРИ ЗНАЧЕНИЯ, КОТОРЫЕ НАДО ПОДСТАВИТЬ
-   Больше в этом файле менять нечего.
+   1. ТРИ ЗНАЧЕНИЯ
+   Правильный способ — НЕ трогать этот файл вообще:
+   открой таблицу, меню «Узелок» → «Ввести ключи», вставь их в окошки.
+   Так они лягут в хранилище проекта, а не в текст кода.
+
+   Строки ниже — запасной путь, если так удобнее. Оставишь как есть —
+   ничего не сломается, бот возьмёт значения из хранилища.
    ══════════════════════════════════════════════════════════════════ */
 
 /** Токен от @BotFather, вида 7712345678:AAF... */
@@ -112,8 +117,89 @@ var PROMPT = [
 
 
 /* ══════════════════════════════════════════════════════════════════
+   3.5 ОТКУДА БЕРУТСЯ КЛЮЧИ
+   Сначала смотрим в хранилище проекта (меню «Ввести ключи»),
+   и только если там пусто — в строки выше.
+   ══════════════════════════════════════════════════════════════════ */
+
+function hranilishe() {
+  return PropertiesService.getScriptProperties();
+}
+
+function nastroyka(imya, izKoda) {
+  var v = '';
+  try { v = hranilishe().getProperty(imya) || ''; } catch (err) { v = ''; }
+  if (v) return String(v).trim();
+  return isPlaceholder(izKoda) ? '' : String(izKoda).trim();
+}
+
+function tokenBota()   { return nastroyka('BOT_TOKEN', BOT_TOKEN); }
+function kluchModeli() { return nastroyka('GEMINI_KEY', GEMINI_KEY); }
+function moyChat()     { return nastroyka('MY_CHAT_ID', MY_CHAT_ID ? String(MY_CHAT_ID) : ''); }
+
+
+/* ══════════════════════════════════════════════════════════════════
    4. НАСТРОЙКА — запускается один раз руками
    ══════════════════════════════════════════════════════════════════ */
+
+/**
+ * Спрашивает три значения окошками и кладёт в хранилище проекта.
+ * Код при этом не меняется — значит и новую версию развёртывания
+ * делать не надо, ключи подхватываются на лету.
+ */
+function ВвестиКлючи() {
+  var ui = SpreadsheetApp.getUi();
+
+  var spros = function (zagolovok, poyasnenie, tekushee) {
+    var hvost = tekushee ? '\n\nСейчас записано: ' + zatemnit(tekushee) +
+                           '\nОставить как есть — нажми «Отмена».' : '';
+    var r = ui.prompt(zagolovok, poyasnenie + hvost, ui.ButtonSet.OK_CANCEL);
+    if (r.getSelectedButton() !== ui.Button.OK) return null;
+    var v = String(r.getResponseText() || '').trim();
+    return v || null;
+  };
+
+  var itog = [];
+
+  var t = spros('Токен бота',
+    'Вставь токен от @BotFather. Выглядит так: 7712345678:AAFdKk9-…', tokenBota());
+  if (t) {
+    if (t.indexOf(':') < 0) { ui.alert('Это не похоже на токен — в нём должно быть двоеточие. Ничего не записал.'); return; }
+    hranilishe().setProperty('BOT_TOKEN', t);
+    itog.push('токен бота записан');
+  }
+
+  var k = spros('Ключ Gemini',
+    'Вставь ключ из Google AI Studio. Начинается на AIza…', kluchModeli());
+  if (k) {
+    if (k.indexOf('AIza') !== 0) { ui.alert('Ключ Gemini должен начинаться на AIza. Ничего не записал.'); return; }
+    hranilishe().setProperty('GEMINI_KEY', k);
+    itog.push('ключ Gemini записан');
+  }
+
+  var c = spros('Твой номер в Telegram',
+    'Только цифры. Не знаешь — напиши боту /id, он ответит числом.', moyChat());
+  if (c) {
+    if (!/^\d+$/.test(c)) { ui.alert('Номер — это только цифры, без пробелов и букв. Ничего не записал.'); return; }
+    hranilishe().setProperty('MY_CHAT_ID', c);
+    itog.push('номер записан');
+  }
+
+  if (!itog.length) { ui.alert('Ничего не менял.'); return; }
+
+  var vse = tokenBota() && kluchModeli() && moyChat();
+  ui.alert('Ключи',
+    itog.join('\n') + (vse ? '\n\nВсе три на месте. Теперь «Узелок» → «Настроить».'
+                            : '\n\nЧего-то ещё не хватает — загляни в «Проверка».'),
+    ui.ButtonSet.OK);
+}
+
+/** Показывает ключ так, чтобы узнать можно, а списать нельзя. */
+function zatemnit(v) {
+  var s = String(v || '');
+  if (s.length <= 8) return '••••';
+  return s.slice(0, 4) + '…' + s.slice(-4);
+}
 
 /**
  * Создаёт шесть листов, вешает утренний будильник и говорит Telegram,
@@ -163,8 +249,9 @@ function Настроить() {
     log.push('ВЕБ-ПРИЛОЖЕНИЕ ЕЩЁ НЕ РАЗВЁРНУТО.');
     log.push('Сделай: Развернуть → Новое развёртывание → Веб-приложение,');
     log.push('доступ «Все», выполнять «от моего имени». Потом запусти Настроить() ещё раз.');
-  } else if (isPlaceholder(BOT_TOKEN)) {
-    log.push('Токен бота ещё не подставлен — webhook не тронут.');
+  } else if (!tokenBota()) {
+    log.push('Токен бота ещё не задан — webhook не тронут.');
+    log.push('Меню «Узелок» → «Ввести ключи», потом запусти Настроить() ещё раз.');
   } else {
     var r = tg('setWebhook', {
       url: url,
@@ -187,14 +274,16 @@ function Проверка() {
   var ok = function (t) { log.push('OK   ' + t); };
   var no = function (t) { log.push('НЕТ  ' + t); };
 
-  // Подставлены ли значения
-  isPlaceholder(BOT_TOKEN) ? no('токен бота не подставлен') : ok('токен бота подставлен');
-  isPlaceholder(GEMINI_KEY) ? no('ключ Gemini не подставлен') : ok('ключ Gemini подставлен');
-  MY_CHAT_ID ? ok('твой Telegram ID: ' + MY_CHAT_ID)
-             : no('MY_CHAT_ID = 0 — напиши боту /id, он пришлёт число');
+  // Заданы ли значения
+  tokenBota()   ? ok('токен бота на месте (' + zatemnit(tokenBota()) + ')')
+                : no('токена бота нет — меню «Узелок» → «Ввести ключи»');
+  kluchModeli() ? ok('ключ Gemini на месте (' + zatemnit(kluchModeli()) + ')')
+                : no('ключа Gemini нет — меню «Узелок» → «Ввести ключи»');
+  moyChat()     ? ok('твой Telegram ID: ' + moyChat())
+                : no('номера нет — напиши боту /id, он пришлёт число');
 
   // Бот
-  if (!isPlaceholder(BOT_TOKEN)) {
+  if (tokenBota()) {
     var me = tg('getMe', {});
     (me && me.ok) ? ok('бот отвечает: @' + me.result.username)
                   : no('бот не отвечает — токен неверный? ' + JSON.stringify(me));
@@ -211,7 +300,7 @@ function Проверка() {
   }
 
   // Модель
-  if (!isPlaceholder(GEMINI_KEY)) {
+  if (kluchModeli()) {
     try {
       var probe = gemini('', [{ text: 'Ответь одним словом: готов' }], 30, false);
       probe ? ok('модель ' + MODEL + ' отвечает: ' + probe)
@@ -246,8 +335,8 @@ function Проверка() {
                         ' — поставь его в Настройках проекта, иначе сводка придёт не в 8:30');
 
   // Живое сообщение
-  if (MY_CHAT_ID && !isPlaceholder(BOT_TOKEN)) {
-    var s = tg('sendMessage', { chat_id: MY_CHAT_ID, text: 'Проверка связи. Я на месте.' });
+  if (moyChat() && tokenBota()) {
+    var s = tg('sendMessage', { chat_id: moyChat(), text: 'Проверка связи. Я на месте.' });
     (s && s.ok) ? ok('тестовое сообщение отправлено в Telegram')
                 : no('сообщение не дошло: ' + JSON.stringify(s));
   }
@@ -296,7 +385,8 @@ function doPost(e) {
   }
 
   // Замок: всё остальное — только для хозяина.
-  if (!MY_CHAT_ID || String(chat) !== String(MY_CHAT_ID)) return ok;
+  var moy = moyChat();
+  if (!moy || String(chat) !== moy) return ok;
 
   // Telegram повторяет доставку, если ответ пришёл не сразу. Отсекаем дубли.
   var cache = CacheService.getScriptCache();
@@ -445,7 +535,7 @@ function gemini(system, parts, maxTokens, json) {
   var r = UrlFetchApp.fetch(API_BASE + '/models/' + MODEL + ':generateContent', {
     method: 'post',
     contentType: 'application/json',
-    headers: { 'x-goog-api-key': GEMINI_KEY },
+    headers: { 'x-goog-api-key': kluchModeli() },
     payload: JSON.stringify(body),
     muteHttpExceptions: true
   });
@@ -493,7 +583,7 @@ function rasshifrovat(fileId, mime) {
 function spisokModeley() {
   try {
     var r = UrlFetchApp.fetch(API_BASE + '/models', {
-      headers: { 'x-goog-api-key': GEMINI_KEY },
+      headers: { 'x-goog-api-key': kluchModeli() },
       muteHttpExceptions: true
     });
     if (r.getResponseCode() !== 200) {
@@ -634,9 +724,10 @@ function snimok() {
 
 /** Запускается будильником около 8:30. */
 function УтренняяСводка() {
-  if (!MY_CHAT_ID) return;
+  var moy = moyChat();
+  if (!moy) return;
   var t = svodka(true);   // true — пометить сегодняшние напоминания отправленными
-  if (t) send(MY_CHAT_ID, t);
+  if (t) send(moy, t);
 }
 
 /**
@@ -732,7 +823,7 @@ function kolonka(sh, imya) {
    ══════════════════════════════════════════════════════════════════ */
 
 function tg(metod, params) {
-  var r = UrlFetchApp.fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/' + metod, {
+  var r = UrlFetchApp.fetch('https://api.telegram.org/bot' + tokenBota() + '/' + metod, {
     method: 'post',
     payload: params,
     muteHttpExceptions: true
@@ -756,7 +847,7 @@ function skachat(fileId) {
   var f = tg('getFile', { file_id: fileId });
   if (!f || !f.ok) return null;
   var r = UrlFetchApp.fetch(
-    'https://api.telegram.org/file/bot' + BOT_TOKEN + '/' + f.result.file_path,
+    'https://api.telegram.org/file/bot' + tokenBota() + '/' + f.result.file_path,
     { muteHttpExceptions: true }
   );
   return r.getResponseCode() === 200 ? r.getBlob() : null;
@@ -844,6 +935,7 @@ function isPlaceholder(v) {
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Узелок')
+    .addItem('Ввести ключи', 'ВвестиКлючи')
     .addItem('Настроить', 'Настроить')
     .addItem('Проверка', 'Проверка')
     .addItem('Прислать сводку сейчас', 'УтренняяСводка')
