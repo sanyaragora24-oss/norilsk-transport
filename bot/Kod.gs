@@ -334,7 +334,7 @@ function obrabotat(msg, chat) {
   }
 
   if (cmd === '/неделя' || cmd === '/week') {
-    send(chat, svodka());
+    send(chat, svodka(false));
     return;
   }
 
@@ -606,15 +606,19 @@ function snimok() {
 /** Запускается будильником около 8:30. */
 function УтренняяСводка() {
   if (!MY_CHAT_ID) return;
-  var t = svodka();
+  var t = svodka(true);   // true — пометить сегодняшние напоминания отправленными
   if (t) send(MY_CHAT_ID, t);
 }
 
 /**
  * Собирается без модели — из самих таблиц. Так надёжнее и бесплатно:
  * даже если ключ кончился, утреннее сообщение всё равно придёт.
+ *
+ * pometit — помечать ли сегодняшние напоминания отправленными.
+ * Утренняя рассылка помечает, ручное «/неделя» — нет, иначе спросил в семь утра
+ * и в 8:30 напоминания уже не пришли бы.
  */
-function svodka() {
+function svodka(pometit) {
   var segodnya = segodnyaISO();
   var granica = plusDney(segodnya, HORIZON_DAYS);
   var out = [];
@@ -629,7 +633,7 @@ function svodka() {
       if (!d) return;
       if (d <= segodnya) {
         segodnyashnie.push(r);
-        if (String(r['повтор']).toLowerCase() !== 'да') {
+        if (pometit && String(r['повтор']).toLowerCase() !== 'да') {
           var col = kolonka(sh, 'отправлено');
           if (col) sh.getRange(r._строка, col).setValue('да');
         }
