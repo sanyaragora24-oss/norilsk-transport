@@ -643,7 +643,12 @@ function svodka(pometit) {
 
   if (segodnyashnie.length) {
     out.push('Сегодня:');
-    segodnyashnie.forEach(function (r) { out.push('• ' + vremya(r['когда']) + r['текст']); });
+    segodnyashnie.forEach(function (r) {
+      // Вчерашнее не должно выглядеть как сегодняшнее — показываем, с какого числа висит.
+      var d = data10(r['когда']);
+      if (d && d < segodnya) out.push('• ' + r['текст'] + ' — с ' + poRusski(d));
+      else out.push('• ' + vremya(r['когда']) + r['текст']);
+    });
   }
 
   // Дела: просроченные и ближайшие
@@ -661,13 +666,13 @@ function svodka(pometit) {
   if (prosr.length) {
     out.push(out.length ? '' : null);
     out.push('Просрочено:');
-    prosr.sort(poSroku).forEach(function (r) { out.push('• ' + r['текст'] + ' — было до ' + data10(r['срок'])); });
+    prosr.sort(poSroku).forEach(function (r) { out.push('• ' + r['текст'] + ' — было до ' + poRusski(r['срок'])); });
   }
 
   if (blizhnie.length) {
     out.push('');
     out.push('На этой неделе:');
-    blizhnie.sort(poSroku).forEach(function (r) { out.push('• ' + r['текст'] + ' — до ' + data10(r['срок'])); });
+    blizhnie.sort(poSroku).forEach(function (r) { out.push('• ' + r['текст'] + ' — до ' + poRusski(r['срок'])); });
   }
 
   if (bezSroka) {
@@ -677,10 +682,10 @@ function svodka(pometit) {
 
   var chistyy = out.filter(function (x) { return x !== null; });
   if (!segodnyashnie.length && !prosr.length && !blizhnie.length) {
-    return segodnya + '. На сегодня и на неделю ничего срочного.' +
+    return poRusski(segodnya) + '. На сегодня и на неделю ничего срочного.' +
            (bezSroka ? ' Без срока висит: ' + bezSroka + '.' : '');
   }
-  return segodnya + ', ' + denNedeli(segodnya) + '.\n\n' + chistyy.join('\n');
+  return poRusski(segodnya) + ', ' + denNedeli(segodnya) + '.\n\n' + chistyy.join('\n');
 }
 
 /** Номер колонки по заголовку. */
@@ -771,6 +776,22 @@ function data10(v) {
 function vremya(v) {
   var m = String(v || '').match(/(\d{2}:\d{2})/);
   return m ? m[1] + ' — ' : '';
+}
+
+/**
+ * «2026-09-15» → «15 сентября». Другой год — «15 сентября 2027».
+ * Только для сообщений: в таблице даты остаются машинными, чтобы сортировались.
+ */
+function poRusski(iso) {
+  var d = data10(iso);
+  if (!d) return String(iso || '');
+  var mesyacy = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+                 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+  var m = parseInt(d.slice(5, 7), 10) - 1;
+  if (m < 0 || m > 11) return d;
+  var text = parseInt(d.slice(8, 10), 10) + ' ' + mesyacy[m];
+  if (d.slice(0, 4) !== segodnyaISO().slice(0, 4)) text += ' ' + d.slice(0, 4);
+  return text;
 }
 
 function denNedeli(iso) {
