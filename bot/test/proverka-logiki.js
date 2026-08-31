@@ -8,6 +8,8 @@ global.Utilities = {
       hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
     }).formatToParts(d).reduce((a, x) => (a[x.type] = x.value, a), {});
     if (fmt === 'yyyy-MM-dd') return `${p.year}-${p.month}-${p.day}`;
+    if (fmt === 'yyyy-MM-dd HH:mm') return `${p.year}-${p.month}-${p.day} ${p.hour}:${p.minute}`;
+    if (fmt === 'HH:mm') return `${p.hour}:${p.minute}`;
     return `${p.year}-${p.month}-${p.day}-${p.hour}${p.minute}${p.second}`;
   },
   base64Encode: b => Buffer.from(b).toString('base64')
@@ -74,8 +76,10 @@ eval(src);
 
 // Подменяем "сегодня"
 const RealDate = Date;
+let SEYCHAS = FIXED_NOW;
+const FIXED_NOW_SET = d => { SEYCHAS = d; };
 global.Date = class extends RealDate {
-  constructor(...a) { return a.length ? new RealDate(...a) : new RealDate(FIXED_NOW); }
+  constructor(...a) { return a.length ? new RealDate(...a) : new RealDate(SEYCHAS); }
 };
 global.Date.now = () => FIXED_NOW.getTime();
 
@@ -356,6 +360,51 @@ ochered.push(soobshenie(17, 'без токена'));
 opros();
 eq('опрос: без токена ничего не делает', razobrano, []);
 svoystvaProekta['BOT_TOKEN'] = bylToken;
+
+// --- Разбор вставки с ключами ---
+eq('вставка: три строки в любом порядке',
+   razobratKluchi('284736591\nAIzaSyAbCdEfGh1234567\n7712345678:AAFdKk9-xxxxxxxxxxxxxxxxxxxxxx'),
+   { MY_CHAT_ID: '284736591', GEMINI_KEY: 'AIzaSyAbCdEfGh1234567',
+     BOT_TOKEN: '7712345678:AAFdKk9-xxxxxxxxxxxxxxxxxxxxxx' });
+eq('вставка: лишние строки не мешают',
+   razobratKluchi('вот мои ключи:\n\nAIzaSyAbCdEfGh1234567\nспасибо'),
+   { GEMINI_KEY: 'AIzaSyAbCdEfGh1234567' });
+eq('вставка: кавычки по краям срезаются',
+   razobratKluchi('"AIzaSyAbCdEfGh1234567"'), { GEMINI_KEY: 'AIzaSyAbCdEfGh1234567' });
+eq('вставка: пустое не падает', razobratKluchi(''), {});
+eq('вставка: только мусор ничего не даёт', razobratKluchi('привет\nкак дела'), {});
+eq('вставка: токен не путается с номером',
+   razobratKluchi('7712345678:AAFdKk9-xxxxxxxxxxxxxxxxxxxxxx').BOT_TOKEN !== undefined
+   && razobratKluchi('7712345678:AAFdKk9-xxxxxxxxxxxxxxxxxxxxxx').MY_CHAT_ID === undefined, true);
+eq('вставка: короткое число за номер не считаем', razobratKluchi('42'), {});
+eq('вставка: первое значение выигрывает у второго',
+   razobratKluchi('284736591\n999999999').MY_CHAT_ID, '284736591');
+
+// --- Утро приходит по твоему времени, а не по поясу проекта ---
+poslano = [];
+delete svoystvaProekta['SVODKA_DEN'];
+sheets.forEach(x => { x.rows = []; });
+sheets.find(x => x.name === 'Напоминания').rows = [['2026-09-08', 'позвонить маме', 'нет', 'нет']];
+
+// 12:00 UTC = 19:00 в Красноярске — не утро
+FIXED_NOW_SET(new RealDate('2026-09-08T12:00:00Z'));
+utrom();
+eq('утро: вечером не шлём', poslano.length, 0);
+
+// 02:00 UTC = 09:00 в Красноярске — попадаем в окно
+FIXED_NOW_SET(new RealDate('2026-09-08T02:00:00Z'));
+utrom();
+eq('утро: в окно попали, сводка ушла', poslano.length, 1);
+eq('утро: день отмечен', svoystvaProekta['SVODKA_DEN'], '2026-09-08');
+
+utrom();
+eq('утро: второй раз за день не шлём', poslano.length, 1);
+
+// следующий день
+FIXED_NOW_SET(new RealDate('2026-09-09T02:00:00Z'));
+sheets.find(x => x.name === 'Напоминания').rows = [['2026-09-09', 'забрать посылку', 'нет', 'нет']];
+utrom();
+eq('утро: назавтра шлём снова', poslano.length, 2);
 
 console.log(fails ? `\nПРОВАЛОВ: ${fails}` : '\nВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

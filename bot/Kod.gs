@@ -152,6 +152,21 @@ function moyChat()     { return nastroyka('MY_CHAT_ID', MY_CHAT_ID ? String(MY_C
 function ВвестиКлючи() {
   var ui = SpreadsheetApp.getUi();
 
+  // Сначала пробуем принять всё одной вставкой: что есть — разберём по виду.
+  var srazu = ui.prompt('Ключи Узелка',
+    'Вставь всё сразу, каждое с новой строки — порядок неважен:\n' +
+    '  • токен бота от @BotFather\n' +
+    '  • ключ Gemini (начинается на AIza)\n' +
+    '  • твой номер в Telegram (только цифры)\n\n' +
+    'Есть не всё — вставь что есть, про остальное спрошу отдельно.',
+    ui.ButtonSet.OK_CANCEL);
+
+  var nashli = {};
+  if (srazu.getSelectedButton() === ui.Button.OK) {
+    nashli = razobratKluchi(srazu.getResponseText());
+    Object.keys(nashli).forEach(function (k) { hranilishe().setProperty(k, nashli[k]); });
+  }
+
   var spros = function (zagolovok, poyasnenie, tekushee) {
     var hvost = tekushee ? '\n\nСейчас записано: ' + zatemnit(tekushee) +
                            '\nОставить как есть — нажми «Отмена».' : '';
@@ -162,29 +177,36 @@ function ВвестиКлючи() {
   };
 
   var itog = [];
+  if (nashli['BOT_TOKEN'])  itog.push('токен бота узнал из вставки');
+  if (nashli['GEMINI_KEY']) itog.push('ключ Gemini узнал из вставки');
+  if (nashli['MY_CHAT_ID']) itog.push('номер узнал из вставки');
 
-  var t = spros('Токен бота',
-    'Вставь токен от @BotFather. Выглядит так: 7712345678:AAFdKk9-…', tokenBota());
-  if (t) {
-    if (t.indexOf(':') < 0) { ui.alert('Это не похоже на токен — в нём должно быть двоеточие. Ничего не записал.'); return; }
-    hranilishe().setProperty('BOT_TOKEN', t);
-    itog.push('токен бота записан');
+  // Чего не хватило — спросим поштучно.
+  if (!tokenBota()) {
+    var t = spros('Токен бота',
+      'Вставь токен от @BotFather. Выглядит так: 7712345678:AAFdKk9-…', '');
+    if (t) {
+      if (t.indexOf(':') < 0) { ui.alert('Это не похоже на токен — в нём должно быть двоеточие. Не записал.'); }
+      else { hranilishe().setProperty('BOT_TOKEN', t); itog.push('токен бота записан'); }
+    }
   }
 
-  var k = spros('Ключ Gemini',
-    'Вставь ключ из Google AI Studio. Начинается на AIza…', kluchModeli());
-  if (k) {
-    if (k.indexOf('AIza') !== 0) { ui.alert('Ключ Gemini должен начинаться на AIza. Ничего не записал.'); return; }
-    hranilishe().setProperty('GEMINI_KEY', k);
-    itog.push('ключ Gemini записан');
+  if (!kluchModeli()) {
+    var k = spros('Ключ Gemini',
+      'Вставь ключ из Google AI Studio. Начинается на AIza…', '');
+    if (k) {
+      if (k.indexOf('AIza') !== 0) { ui.alert('Ключ Gemini должен начинаться на AIza. Не записал.'); }
+      else { hranilishe().setProperty('GEMINI_KEY', k); itog.push('ключ Gemini записан'); }
+    }
   }
 
-  var c = spros('Твой номер в Telegram',
-    'Только цифры. Не знаешь — напиши боту /id, он ответит числом.', moyChat());
-  if (c) {
-    if (!/^\d+$/.test(c)) { ui.alert('Номер — это только цифры, без пробелов и букв. Ничего не записал.'); return; }
-    hranilishe().setProperty('MY_CHAT_ID', c);
-    itog.push('номер записан');
+  if (!moyChat()) {
+    var c = spros('Твой номер в Telegram',
+      'Только цифры. Не знаешь — напиши боту /id, он ответит числом.', '');
+    if (c) {
+      if (!/^\d+$/.test(c)) { ui.alert('Номер — это только цифры, без пробелов и букв. Не записал.'); }
+      else { hranilishe().setProperty('MY_CHAT_ID', c); itog.push('номер записан'); }
+    }
   }
 
   if (!itog.length) { ui.alert('Ничего не менял.'); return; }
@@ -194,6 +216,23 @@ function ВвестиКлючи() {
     itog.join('\n') + (vse ? '\n\nВсе три на месте. Теперь «Узелок» → «Настроить».'
                             : '\n\nЧего-то ещё не хватает — загляни в «Проверка».'),
     ui.ButtonSet.OK);
+}
+
+/**
+ * Разбирает вставленный кусок текста и раскладывает по виду строки:
+ * с двоеточием — токен, на AIza — ключ, только цифры — номер.
+ * Мусор и лишние строки просто игнорируются.
+ */
+function razobratKluchi(text) {
+  var out = {};
+  String(text || '').split(/[\r\n]+/).forEach(function (stroka) {
+    var v = String(stroka).trim().replace(/^["'<]+|["'>]+$/g, '');
+    if (!v) return;
+    if (/^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(v))      { if (!out['BOT_TOKEN'])  out['BOT_TOKEN'] = v; }
+    else if (/^AIza[A-Za-z0-9_-]{10,}$/.test(v))     { if (!out['GEMINI_KEY']) out['GEMINI_KEY'] = v; }
+    else if (/^\d{5,15}$/.test(v))                   { if (!out['MY_CHAT_ID']) out['MY_CHAT_ID'] = v; }
+  });
+  return out;
 }
 
 /** Показывает ключ так, чтобы узнать можно, а списать нельзя. */
@@ -235,13 +274,16 @@ function Настроить() {
     log.push('удалён пустой Лист1');
   }
 
-  // 4.2 Утренний будильник
+  // 4.2 Утренний будильник. Ходит каждый час, а отправляет один раз —
+  //     когда по твоему часовому поясу наступает нужное время.
+  //     Поэтому часовой пояс проекта настраивать не надо.
   ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'УтренняяСводка') ScriptApp.deleteTrigger(t);
+    var f = t.getHandlerFunction();
+    if (f === 'utrom' || f === 'УтренняяСводка') ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('УтренняяСводка')
-    .timeBased().atHour(MORNING_HOUR).nearMinute(MORNING_MINUTE).everyDays(1).create();
-  log.push('будильник поставлен на ~' + MORNING_HOUR + ':' + pad2(MORNING_MINUTE));
+  ScriptApp.newTrigger('utrom').timeBased().everyHours(1).create();
+  log.push('сводка будет приходить около ' + MORNING_HOUR + ':' + pad2(MORNING_MINUTE) +
+           ' по времени ' + TZ);
 
   // 4.3 Связь с Telegram. Способ выбирается сам:
   //     развёрнуто веб-приложение — Telegram пишет нам (мгновенно);
@@ -338,15 +380,14 @@ function Проверка() {
 
   // Будильник
   var est = ScriptApp.getProjectTriggers().some(function (t) {
-    return t.getHandlerFunction() === 'УтренняяСводка';
+    return t.getHandlerFunction() === 'utrom';
   });
-  est ? ok('утренний будильник стоит') : no('утреннего будильника нет — запусти Настроить()');
+  est ? ok('утренний будильник стоит')
+      : no('утреннего будильника нет — запусти «Настроить»');
 
-  // Часовой пояс
-  var tzProekta = Session.getScriptTimeZone();
-  tzProekta === TZ ? ok('часовой пояс проекта: ' + tzProekta)
-                   : no('часовой пояс проекта ' + tzProekta + ', а в коде ' + TZ +
-                        ' — поставь его в Настройках проекта, иначе сводка придёт не в 8:30');
+  // Время
+  ok('сейчас у тебя ' + Utilities.formatDate(new Date(), TZ, 'HH:mm') +
+     ' (' + TZ + '), сводка приходит около ' + MORNING_HOUR + ':' + pad2(MORNING_MINUTE));
 
   // Живое сообщение
   if (moyChat() && tokenBota()) {
@@ -439,6 +480,9 @@ function opros() {
   } finally {
     lock.releaseLock();
   }
+
+  // Раз уж просыпаемся каждую минуту — заодно смотрим, не пора ли сводку.
+  try { utrom(); } catch (err) { Logger.log('утро: ' + (err.stack || err.message)); }
 }
 
 /** Одно сообщение — общее для обоих способов. Замок берёт вызывающий. */
@@ -783,7 +827,32 @@ function snimok() {
    8. УТРЕННЯЯ СВОДКА
    ══════════════════════════════════════════════════════════════════ */
 
-/** Запускается будильником около 8:30. */
+/**
+ * Будильник дёргает это каждый час. Отправляем, когда у ТЕБЯ наступило утро,
+ * и только один раз в день. Час считается по TZ из настроек, а не по
+ * часовому поясу проекта — поэтому его можно вообще не трогать.
+ */
+function utrom() {
+  var moy = moyChat();
+  if (!moy) return;
+
+  var mestnoe = Utilities.formatDate(new Date(), TZ, 'yyyy-MM-dd HH:mm');
+  var den = mestnoe.slice(0, 10);
+  var minut = Number(mestnoe.slice(11, 13)) * 60 + Number(mestnoe.slice(14, 16));
+  var nado = MORNING_HOUR * 60 + MORNING_MINUTE;
+
+  // Окно в три часа: будильник срабатывает раз в час и должен успеть попасть.
+  if (minut < nado || minut > nado + 180) return;
+
+  var pamyat = hranilishe();
+  if (pamyat.getProperty('SVODKA_DEN') === den) return;   // сегодня уже слали
+  pamyat.setProperty('SVODKA_DEN', den);
+
+  var t = svodka(true);
+  if (t) send(moy, t);
+}
+
+/** Прислать сводку прямо сейчас — из меню, без оглядки на время. */
 function УтренняяСводка() {
   var moy = moyChat();
   if (!moy) return;
