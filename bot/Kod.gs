@@ -5,17 +5,19 @@
  * Сервера не надо, платить за хостинг не надо, VPN не надо.
  *
  * Что делает:
- *   • ловит из Telegram текст, голосовые, фото и файлы;
+ *   • ловит из Telegram текст, голосовые, фото и файлы —
+ *     сам, опросом раз в минуту, либо мгновенно, если развернуть веб-приложение;
  *   • расшифровывает голос и читает фото словами — одной моделью Gemini;
  *   • раскладывает по шести листам этой же таблицы;
  *   • отвечает на вопросы вроде «что мне нужно сделать на этой неделе»;
  *   • около 8:30 сам присылает, что сегодня и что горит.
  *
  * Порядок настройки — в docs/nastroyka.md. Коротко:
- *   1. подставить три значения ниже;
- *   2. Развернуть → Новое развёртывание → Веб-приложение;
- *   3. запустить функцию Настроить();
- *   4. запустить функцию Проверка().
+ *   1. вставить этот файл в редактор и сохранить;
+ *   2. обновить таблицу (F5) — появится меню «Узелок»;
+ *   3. «Ввести ключи» — три окошка;
+ *   4. «Настроить», потом «Проверка».
+ * Развёртывание не обязательно: без него бот работает опросом.
  */
 
 /* ══════════════════════════════════════════════════════════════════
@@ -241,25 +243,32 @@ function Настроить() {
     .timeBased().atHour(MORNING_HOUR).nearMinute(MORNING_MINUTE).everyDays(1).create();
   log.push('будильник поставлен на ~' + MORNING_HOUR + ':' + pad2(MORNING_MINUTE));
 
-  // 4.3 Webhook — адрес, по которому Telegram будет стучаться
+  // 4.3 Связь с Telegram. Способ выбирается сам:
+  //     развёрнуто веб-приложение — Telegram пишет нам (мгновенно);
+  //     не развёрнуто — спрашиваем сами раз в минуту.
   var url = '';
   try { url = ScriptApp.getService().getUrl() || ''; } catch (err) { url = ''; }
 
-  if (!url) {
-    log.push('ВЕБ-ПРИЛОЖЕНИЕ ЕЩЁ НЕ РАЗВЁРНУТО.');
-    log.push('Сделай: Развернуть → Новое развёртывание → Веб-приложение,');
-    log.push('доступ «Все», выполнять «от моего имени». Потом запусти Настроить() ещё раз.');
-  } else if (!tokenBota()) {
-    log.push('Токен бота ещё не задан — webhook не тронут.');
-    log.push('Меню «Узелок» → «Ввести ключи», потом запусти Настроить() ещё раз.');
-  } else {
+  if (!tokenBota()) {
+    log.push('Токена бота ещё нет — связь не настраивал.');
+    log.push('Меню «Узелок» → «Ввести ключи», потом «Настроить» ещё раз.');
+  } else if (url) {
+    ubratOpros();
     var r = tg('setWebhook', {
       url: url,
       drop_pending_updates: true,
       allowed_updates: JSON.stringify(['message'])
     });
-    log.push(r && r.ok ? 'Telegram теперь пишет сюда: ' + url
-                       : 'НЕ УДАЛОСЬ ПРОПИСАТЬ WEBHOOK: ' + JSON.stringify(r));
+    log.push(r && r.ok
+      ? 'Связь: Telegram пишет напрямую, ответ мгновенный.'
+      : 'НЕ УДАЛОСЬ ПРОПИСАТЬ WEBHOOK: ' + JSON.stringify(r));
+  } else {
+    tg('deleteWebhook', { drop_pending_updates: false });
+    ubratOpros();
+    ScriptApp.newTrigger('opros').timeBased().everyMinutes(1).create();
+    log.push('Связь: бот сам спрашивает Telegram раз в минуту.');
+    log.push('Работает без развёртывания. Ответ приходит в течение минуты.');
+    log.push('Хочешь мгновенно — разверни веб-приложение и запусти «Настроить» ещё раз.');
   }
 
   otchet('Настройка', log);
@@ -288,14 +297,19 @@ function Проверка() {
     (me && me.ok) ? ok('бот отвечает: @' + me.result.username)
                   : no('бот не отвечает — токен неверный? ' + JSON.stringify(me));
 
+    var estOpros = ScriptApp.getProjectTriggers().some(function (t) {
+      return t.getHandlerFunction() === 'opros';
+    });
     var wh = tg('getWebhookInfo', {});
     if (wh && wh.ok && wh.result.url) {
-      ok('webhook: ' + wh.result.url);
+      ok('связь: Telegram пишет напрямую, ответ мгновенный');
       if (wh.result.last_error_message) {
         no('последняя ошибка доставки: ' + wh.result.last_error_message);
       }
+    } else if (estOpros) {
+      ok('связь: опрос раз в минуту (без развёртывания)');
     } else {
-      no('webhook не прописан — запусти Настроить() после развёртывания');
+      no('связи с Telegram нет — запусти «Настроить»');
     }
   }
 
@@ -344,6 +358,13 @@ function Проверка() {
   otchet('Проверка', log);
 }
 
+/** Снимает будильник опроса, если он стоял. */
+function ubratOpros() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'opros') ScriptApp.deleteTrigger(t);
+  });
+}
+
 /** Печатает отчёт в журнал и, если открыта таблица, показывает окном. */
 function otchet(zagolovok, stroki) {
   var text = zagolovok + '\n' + stroki.join('\n');
@@ -364,6 +385,7 @@ function doGet() {
   return ContentService.createTextOutput('Узелок на месте.');
 }
 
+/** Приходит, когда Telegram стучится сам (после развёртывания). */
 function doPost(e) {
   var ok = ContentService.createTextOutput('ok');
   var upd;
@@ -373,42 +395,81 @@ function doPost(e) {
     return ok;
   }
 
-  var msg = upd.message;
-  if (!msg || !msg.chat) return ok;
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) return ok;
+  try { obrabotatUpdate(upd); } finally { lock.releaseLock(); }
+  return ok;
+}
+
+/**
+ * Опрос: то же самое, но бот сам спрашивает Telegram, нет ли новых сообщений.
+ * Запускается будильником раз в минуту, когда веб-приложение не развёрнуто.
+ * Ответ приходит не мгновенно, а в течение минуты — это единственная разница.
+ */
+function opros() {
+  if (!tokenBota()) return;
+
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return;   // предыдущий опрос ещё идёт — пропускаем круг
+
+  try {
+    var pamyat = hranilishe();
+    var off = Number(pamyat.getProperty('TG_OFFSET') || 0);
+
+    for (var krug = 0; krug < 5; krug++) {
+      var r = tg('getUpdates', {
+        offset: off,
+        timeout: 0,
+        limit: 20,
+        allowed_updates: JSON.stringify(['message'])
+      });
+      if (!r || !r.ok || !r.result || !r.result.length) break;
+
+      for (var i = 0; i < r.result.length; i++) {
+        var upd = r.result[i];
+        if (upd.update_id >= off) off = upd.update_id + 1;
+        // Смещение сохраняем ДО обработки: упавшее сообщение не должно
+        // возвращаться круг за кругом и блокировать всё, что за ним.
+        pamyat.setProperty('TG_OFFSET', String(off));
+        try { obrabotatUpdate(upd); }
+        catch (err) { Logger.log('опрос: ' + (err.stack || err.message)); }
+      }
+      if (r.result.length < 20) break;
+    }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/** Одно сообщение — общее для обоих способов. Замок берёт вызывающий. */
+function obrabotatUpdate(upd) {
+  var msg = upd && upd.message;
+  if (!msg || !msg.chat) return;
 
   var chat = msg.chat.id;
 
   // «/id» отвечаем всем: без него не узнать свой номер.
   if (komanda(msg.text) === '/id') {
     send(chat, 'Твой Telegram ID: ' + chat);
-    return ok;
+    return;
   }
 
   // Замок: всё остальное — только для хозяина.
   var moy = moyChat();
-  if (!moy || String(chat) !== moy) return ok;
+  if (!moy || String(chat) !== moy) return;
 
-  // Telegram повторяет доставку, если ответ пришёл не сразу. Отсекаем дубли.
+  // Одно и то же сообщение может прийти дважды — отсекаем по номеру.
   var cache = CacheService.getScriptCache();
   var kluch = 'upd_' + upd.update_id;
-  if (cache.get(kluch)) return ok;
+  if (cache.get(kluch)) return;
   cache.put(kluch, '1', 600);
-
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) {
-    send(chat, 'Занят предыдущим сообщением, пришли ещё раз через минуту.');
-    return ok;
-  }
 
   try {
     obrabotat(msg, chat);
   } catch (err) {
     send(chat, 'Не смог обработать: ' + err.message);
     Logger.log(err.stack || err.message);
-  } finally {
-    lock.releaseLock();
   }
-  return ok;
 }
 
 /** Разбирает одно сообщение: достаёт текст/голос/фото и отдаёт мозгу. */

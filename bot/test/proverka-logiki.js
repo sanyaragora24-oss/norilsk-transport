@@ -14,6 +14,16 @@ global.Utilities = {
 };
 global.Logger = { log: () => {} };
 const svoystvaProekta = {};
+const keshZapisi = {};
+global.CacheService = {
+  getScriptCache: () => ({
+    get: k => (k in keshZapisi ? keshZapisi[k] : null),
+    put: (k, v) => { keshZapisi[k] = v; }
+  })
+};
+global.LockService = {
+  getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} })
+};
 global.PropertiesService = {
   getScriptProperties: () => ({
     getProperty: k => (k in svoystvaProekta ? svoystvaProekta[k] : null),
@@ -272,6 +282,80 @@ otvetSeti = { kod: 200, telo: JSON.stringify({ models: [
 eq('список моделей: только отвечающие', spisokModeley(), ['gemini-2.5-flash', 'gemini-2.5-pro']);
 otvetSeti = { kod: 403, telo: 'forbidden' };
 eq('список моделей: ошибку не роняем, а показываем', spisokModeley().length, 1);
+
+// --- Опрос Telegram ---
+let ochered = [];        // что Telegram отдаст на следующий getUpdates
+let razobrano = [];      // какие сообщения дошли до обработки
+let poslano = [];        // что бот отправил в чат
+let padatNa = null;      // на каком тексте обработка должна упасть
+
+svoystvaProekta['MY_CHAT_ID'] = '284736591';
+svoystvaProekta['BOT_TOKEN'] = '7712:AAF';
+delete svoystvaProekta['TG_OFFSET'];
+
+tg = (metod, params) => {
+  if (metod === 'getUpdates') {
+    const off = Number(params.offset || 0);
+    const partiya = ochered.filter(u => u.update_id >= off).slice(0, params.limit || 20);
+    return { ok: true, result: partiya };
+  }
+  if (metod === 'sendMessage') { poslano.push(params); return { ok: true }; }
+  return { ok: true, result: {} };
+};
+obrabotat = (msg) => {
+  if (padatNa && msg.text === padatNa) throw new Error('нарочно упало');
+  razobrano.push(msg.text);
+};
+
+const soobshenie = (id, text, chat = 284736591) =>
+  ({ update_id: id, message: { chat: { id: chat }, text: text } });
+
+ochered = [soobshenie(10, 'первое'), soobshenie(11, 'второе')];
+opros();
+eq('опрос: оба сообщения разобраны', razobrano, ['первое', 'второе']);
+eq('опрос: смещение сдвинулось за последнее', svoystvaProekta['TG_OFFSET'], '12');
+
+razobrano = [];
+opros();
+eq('опрос: разобранное второй раз не приходит', razobrano, []);
+
+ochered.push(soobshenie(12, 'третье'));
+opros();
+eq('опрос: новое сообщение подхватывается', razobrano, ['третье']);
+
+// Упавшее сообщение не должно застревать и держать очередь
+razobrano = []; poslano = []; padatNa = 'битое';
+ochered.push(soobshenie(13, 'битое'));
+ochered.push(soobshenie(14, 'после битого'));
+opros();
+eq('опрос: сообщение после упавшего разобрано', razobrano, ['после битого']);
+eq('опрос: про поломку сказано в чат', poslano.length && /Не смог обработать/.test(poslano[0].text), true);
+eq('опрос: смещение ушло за оба', svoystvaProekta['TG_OFFSET'], '15');
+razobrano = []; padatNa = null;
+opros();
+eq('опрос: битое не возвращается кругами', razobrano, []);
+
+// Чужой чат
+razobrano = []; poslano = [];
+ochered.push({ update_id: 15, message: { chat: { id: 999 }, text: 'чужое' } });
+opros();
+eq('опрос: чужое сообщение молча выброшено', [razobrano, poslano], [[], []]);
+
+// /id отвечаем кому угодно — иначе свой номер не узнать
+poslano = [];
+ochered.push({ update_id: 16, message: { chat: { id: 999 }, text: '/id' } });
+opros();
+eq('опрос: /id отвечает и чужому', poslano.length, 1);
+eq('опрос: /id называет номер чата', /999/.test(poslano[0].text), true);
+
+// Без токена опрос не лезет в сеть
+razobrano = [];
+const bylToken = svoystvaProekta['BOT_TOKEN'];
+delete svoystvaProekta['BOT_TOKEN'];
+ochered.push(soobshenie(17, 'без токена'));
+opros();
+eq('опрос: без токена ничего не делает', razobrano, []);
+svoystvaProekta['BOT_TOKEN'] = bylToken;
 
 console.log(fails ? `\nПРОВАЛОВ: ${fails}` : '\nВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);
