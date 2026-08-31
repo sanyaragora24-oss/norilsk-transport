@@ -171,5 +171,83 @@ sheets.forEach(x => { x.rows = []; });
 const pusto = svodka(true);
 eq('пустая таблица не падает', pusto.includes('ничего срочного'), true);
 
+// --- Обмен с Google ---
+// Подменяем сеть: запоминаем, что ушло, и отдаём заготовленный ответ.
+let poslednii = null, otvetSeti = null;
+global.UrlFetchApp = {
+  fetch(url, opts) {
+    poslednii = { url, opts, body: opts && opts.payload && typeof opts.payload === 'string'
+      ? JSON.parse(opts.payload) : opts && opts.payload };
+    return {
+      getResponseCode: () => otvetSeti.kod,
+      getContentText: () => otvetSeti.telo,
+      getBlob: () => null
+    };
+  }
+};
+
+otvetSeti = { kod: 200, telo: JSON.stringify({
+  candidates: [{ content: { parts: [{ text: 'готов' }] }, finishReason: 'STOP' }] }) };
+eq('gemini: читает ответ', gemini('инструкция', [{ text: 'привет' }], 30, false), 'готов');
+eq('gemini: адрес с моделью', poslednii.url.endsWith('/models/' + MODEL + ':generateContent'), true);
+eq('gemini: ключ уходит заголовком, не в адресе',
+   [poslednii.opts.headers['x-goog-api-key'] === GEMINI_KEY, poslednii.url.indexOf('key=') >= 0],
+   [true, false]);
+eq('gemini: системная инструкция на месте', poslednii.body.system_instruction.parts[0].text, 'инструкция');
+eq('gemini: без json-режима формат не требуем',
+   poslednii.body.generationConfig.responseMimeType, undefined);
+
+gemini('', [{ text: 'x' }], 50, true);
+eq('gemini: json-режим требует чистый JSON',
+   poslednii.body.generationConfig.responseMimeType, 'application/json');
+eq('gemini: пустую инструкцию не шлём', poslednii.body.system_instruction, undefined);
+
+otvetSeti = { kod: 200, telo: JSON.stringify({
+  candidates: [{ content: { parts: [{ text: '{"ответ":' }, { text: '"да","записи":[]}' }] } }] }) };
+eq('gemini: склеивает ответ из нескольких кусков',
+   gemini('', [{ text: 'x' }], 50, true), '{"ответ":"да","записи":[]}');
+
+otvetSeti = { kod: 429, telo: '{"error":{"message":"quota"}}' };
+let lovil = '';
+try { gemini('', [{ text: 'x' }], 10, false); } catch (e) { lovil = e.message; }
+eq('gemini: код ошибки виден в сообщении', /429/.test(lovil) && /quota/.test(lovil), true);
+
+otvetSeti = { kod: 200, telo: JSON.stringify({ promptFeedback: { blockReason: 'SAFETY' } }) };
+lovil = '';
+try { gemini('', [{ text: 'x' }], 10, false); } catch (e) { lovil = e.message; }
+eq('gemini: отказ модели объяснён', /SAFETY/.test(lovil), true);
+
+otvetSeti = { kod: 200, telo: JSON.stringify({
+  candidates: [{ content: { parts: [] }, finishReason: 'MAX_TOKENS' }] }) };
+lovil = '';
+try { gemini('', [{ text: 'x' }], 10, false); } catch (e) { lovil = e.message; }
+eq('gemini: обрыв ответа объяснён', /MAX_TOKENS/.test(lovil), true);
+
+// Голосовое уходит вложением с правильным типом
+skachat = () => ({
+  getContentType: () => 'audio/ogg',
+  getBytes: () => Buffer.from('звук')
+});
+otvetSeti = { kod: 200, telo: JSON.stringify({
+  candidates: [{ content: { parts: [{ text: 'оплатить страховку' }] }, finishReason: 'STOP' }] }) };
+eq('расшифровка: возвращает текст', rasshifrovat('file1', 'audio/ogg'), 'оплатить страховку');
+const zvuk = poslednii.body.contents[0].parts.filter(p => p.inline_data)[0];
+eq('расшифровка: звук ушёл вложением', !!zvuk, true);
+eq('расшифровка: тип звука проставлен', zvuk.inline_data.mime_type, 'audio/ogg');
+eq('расшифровка: звук закодирован', zvuk.inline_data.data, Buffer.from('звук').toString('base64'));
+eq('расшифровка: тип берём из блоба, если Telegram не сказал',
+   (rasshifrovat('file1', ''), poslednii.body.contents[0].parts.filter(p => p.inline_data)[0].inline_data.mime_type),
+   'audio/ogg');
+
+// Список моделей — только те, что умеют отвечать
+otvetSeti = { kod: 200, telo: JSON.stringify({ models: [
+  { name: 'models/gemini-2.5-flash', supportedGenerationMethods: ['generateContent'] },
+  { name: 'models/text-embedding-004', supportedGenerationMethods: ['embedContent'] },
+  { name: 'models/gemini-2.5-pro', supportedGenerationMethods: ['generateContent', 'countTokens'] }
+] }) };
+eq('список моделей: только отвечающие', spisokModeley(), ['gemini-2.5-flash', 'gemini-2.5-pro']);
+otvetSeti = { kod: 403, telo: 'forbidden' };
+eq('список моделей: ошибку не роняем, а показываем', spisokModeley().length, 1);
+
 console.log(fails ? `\nПРОВАЛОВ: ${fails}` : '\nВСЕ ПРОВЕРКИ ПРОШЛИ');
 process.exit(fails ? 1 : 0);

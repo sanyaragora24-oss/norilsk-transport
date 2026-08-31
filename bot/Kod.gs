@@ -6,7 +6,7 @@
  *
  * Что делает:
  *   • ловит из Telegram текст, голосовые, фото и файлы;
- *   • расшифровывает голос, читает фото словами;
+ *   • расшифровывает голос и читает фото словами — одной моделью Gemini;
  *   • раскладывает по шести листам этой же таблицы;
  *   • отвечает на вопросы вроде «что мне нужно сделать на этой неделе»;
  *   • около 8:30 сам присылает, что сегодня и что горит.
@@ -26,8 +26,8 @@
 /** Токен от @BotFather, вида 7712345678:AAF... */
 var BOT_TOKEN = 'СЮДА_ТОКЕН_ОТ_BOTFATHER';
 
-/** Ключ от ProxyAPI (или другого шлюза), вида sk-... */
-var API_KEY = 'СЮДА_КЛЮЧ_ОТ_PROXYAPI';
+/** Ключ Gemini из Google AI Studio, вида AIza... */
+var GEMINI_KEY = 'СЮДА_КЛЮЧ_GEMINI';
 
 /** Твой Telegram ID, только цифры. Не знаешь — напиши боту /id, он ответит. */
 var MY_CHAT_ID = 0;
@@ -37,14 +37,15 @@ var MY_CHAT_ID = 0;
    2. НАСТРОЙКИ, КОТОРЫЕ ОБЫЧНО НЕ ТРОГАЮТ
    ══════════════════════════════════════════════════════════════════ */
 
-/** Адрес шлюза. AITunnel: https://api.aitunnel.ru/v1 ; Polza AI: https://api.polza.ai/api/v1 */
-var API_BASE = 'https://api.proxyapi.ru/openai/v1';
+/** Адрес Google. Менять не надо. */
+var API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
 
-/** Модель-«мозг». Если шлюз её не отдаёт — посмотри список моделей в его кабинете. */
-var MODEL_TEXT = 'gpt-4.1-mini';
-
-/** Модель расшифровки голосовых. */
-var MODEL_VOICE = 'whisper-1';
+/**
+ * Модель. Она же расшифровывает голосовые и читает фото — отдельной не нужно.
+ * Если Google скажет, что такой модели нет, Проверка() напечатает список доступных
+ * именно твоему ключу — впиши оттуда.
+ */
+var MODEL = 'gemini-2.5-flash';
 
 /** Во сколько присылать утреннюю сводку (Google фиксирует час, минуты — примерно). */
 var MORNING_HOUR = 8;
@@ -188,7 +189,7 @@ function Проверка() {
 
   // Подставлены ли значения
   isPlaceholder(BOT_TOKEN) ? no('токен бота не подставлен') : ok('токен бота подставлен');
-  isPlaceholder(API_KEY) ? no('ключ модели не подставлен') : ok('ключ модели подставлен');
+  isPlaceholder(GEMINI_KEY) ? no('ключ Gemini не подставлен') : ok('ключ Gemini подставлен');
   MY_CHAT_ID ? ok('твой Telegram ID: ' + MY_CHAT_ID)
              : no('MY_CHAT_ID = 0 — напиши боту /id, он пришлёт число');
 
@@ -210,12 +211,15 @@ function Проверка() {
   }
 
   // Модель
-  if (!isPlaceholder(API_KEY)) {
+  if (!isPlaceholder(GEMINI_KEY)) {
     try {
-      var probe = model([{ role: 'user', content: 'Ответь одним словом: готов' }], 20);
-      probe ? ok('модель ' + MODEL_TEXT + ' отвечает') : no('модель вернула пустой ответ');
+      var probe = gemini('', [{ text: 'Ответь одним словом: готов' }], 30, false);
+      probe ? ok('модель ' + MODEL + ' отвечает: ' + probe)
+            : no('модель вернула пустой ответ');
     } catch (err) {
-      no('модель не отвечает: ' + err.message);
+      no('модель ' + MODEL + ' не отвечает: ' + err.message);
+      log.push('     впиши в MODEL одну из этих — они доступны твоему ключу:');
+      spisokModeley().forEach(function (m) { log.push('       • ' + m); });
     }
   }
 
@@ -357,8 +361,8 @@ function obrabotat(msg, chat) {
     var big = msg.photo[msg.photo.length - 1];   // последнее — самое крупное
     var blob = skachat(big.file_id);
     if (blob) {
-      kartinka = 'data:' + (blob.getContentType() || 'image/jpeg') + ';base64,' +
-                 Utilities.base64Encode(blob.getBytes());
+      kartinka = { mime: blob.getContentType() || 'image/jpeg',
+                   data: Utilities.base64Encode(blob.getBytes()) };
       ssylka = sohranit(blob, 'foto');
     }
   }
@@ -372,7 +376,7 @@ function obrabotat(msg, chat) {
       ssylka = sohranit(d, 'file');
       var mime = String(msg.document.mime_type || '');
       if (mime.indexOf('image/') === 0) {
-        kartinka = 'data:' + mime + ';base64,' + Utilities.base64Encode(d.getBytes());
+        kartinka = { mime: mime, data: Utilities.base64Encode(d.getBytes()) };
       } else {
         text = (text ? text + '. ' : '') + 'Прислан файл: ' + (msg.document.file_name || 'без имени');
       }
@@ -397,20 +401,13 @@ function mozg(text, kartinka, istochnik, ssylka) {
   var system = PROMPT + '\n\nСЕГОДНЯ: ' + segodnya + ' (' + denNedeli(segodnya) + ').' +
                '\n\nЧТО УЖЕ ЛЕЖИТ В ЯЩИКАХ:\n' + snimok();
 
-  var content;
+  var parts = [{ text: text || 'Разбери, что на этом изображении.' }];
   if (kartinka) {
-    content = [
-      { type: 'text', text: text || 'Разбери, что на этом изображении.' },
-      { type: 'image_url', image_url: { url: kartinka } }
-    ];
-  } else {
-    content = text;
+    parts.push({ inline_data: { mime_type: kartinka.mime, data: kartinka.data } });
   }
 
-  var syroy = model([
-    { role: 'system', content: system },
-    { role: 'user', content: content }
-  ], 1200);
+  // json:true — Google обязуется вернуть чистый JSON, без ```-обёрток.
+  var syroy = gemini(system, parts, 1200, true);
 
   var razbor = razobrat(syroy);
   if (!razbor) return syroy || 'Модель ответила непонятно, ничего не записал.';
@@ -428,57 +425,89 @@ function mozg(text, kartinka, istochnik, ssylka) {
   return otvet;
 }
 
-/** Вызов модели. Возвращает строку ответа. */
-function model(messages, maxTokens) {
-  var r = UrlFetchApp.fetch(API_BASE + '/chat/completions', {
+/**
+ * Один вызов Google.
+ *   system — постоянная инструкция, может быть пустой;
+ *   parts  — куски сообщения: {text: "..."} и/или {inline_data: {mime_type, data}};
+ *   json   — потребовать чистый JSON в ответе.
+ */
+function gemini(system, parts, maxTokens, json) {
+  var body = {
+    contents: [{ role: 'user', parts: parts }],
+    generationConfig: {
+      temperature: 0.2,
+      maxOutputTokens: maxTokens || 800
+    }
+  };
+  if (system) body.system_instruction = { parts: [{ text: system }] };
+  if (json) body.generationConfig.responseMimeType = 'application/json';
+
+  var r = UrlFetchApp.fetch(API_BASE + '/models/' + MODEL + ':generateContent', {
     method: 'post',
     contentType: 'application/json',
-    headers: { Authorization: 'Bearer ' + API_KEY },
-    payload: JSON.stringify({
-      model: MODEL_TEXT,
-      messages: messages,
-      temperature: 0.2,
-      max_tokens: maxTokens || 800
-    }),
+    headers: { 'x-goog-api-key': GEMINI_KEY },
+    payload: JSON.stringify(body),
     muteHttpExceptions: true
   });
 
   var kod = r.getResponseCode();
   var telo = r.getContentText();
   if (kod !== 200) {
-    throw new Error('модель вернула ' + kod + ': ' + telo.slice(0, 300));
+    throw new Error('Google вернул ' + kod + ': ' + telo.slice(0, 300));
   }
+
   var j = JSON.parse(telo);
-  return (j.choices && j.choices[0] && j.choices[0].message.content) || '';
+  var kand = j.candidates && j.candidates[0];
+  if (!kand) {
+    var blok = j.promptFeedback && j.promptFeedback.blockReason;
+    throw new Error(blok ? 'Google отказался отвечать: ' + blok
+                         : 'Google не вернул ответ: ' + telo.slice(0, 200));
+  }
+
+  var kuski = (kand.content && kand.content.parts) || [];
+  var out = kuski.map(function (p) { return p.text || ''; }).join('').trim();
+
+  if (!out && kand.finishReason && kand.finishReason !== 'STOP') {
+    throw new Error('Google оборвал ответ: ' + kand.finishReason);
+  }
+  return out;
 }
 
-/** Расшифровка голосового через Whisper. */
+/** Расшифровка голосового: та же модель, звук уходит вложением. */
 function rasshifrovat(fileId, mime) {
   var blob = skachat(fileId);
   if (!blob) return '';
+  var tip = mime || blob.getContentType() || 'audio/ogg';
 
-  // Whisper смотрит на расширение имени файла, а Telegram его не отдаёт — проставляем руками.
-  var ext = 'oga';
-  if (mime) {
-    if (mime.indexOf('mp4') >= 0) ext = 'mp4';
-    else if (mime.indexOf('mpeg') >= 0) ext = 'mp3';
-    else if (mime.indexOf('wav') >= 0) ext = 'wav';
-    else if (mime.indexOf('webm') >= 0) ext = 'webm';
+  return gemini(
+    'Ты расшифровываешь голосовые сообщения на русском языке. Пиши только то, что услышал.',
+    [
+      { text: 'Расшифруй это голосовое дословно. Верни только текст, без пояснений и без кавычек.' },
+      { inline_data: { mime_type: tip, data: Utilities.base64Encode(blob.getBytes()) } }
+    ],
+    1000, false
+  );
+}
+
+/** Список моделей, доступных твоему ключу. Печатается, когда указанная не подошла. */
+function spisokModeley() {
+  try {
+    var r = UrlFetchApp.fetch(API_BASE + '/models', {
+      headers: { 'x-goog-api-key': GEMINI_KEY },
+      muteHttpExceptions: true
+    });
+    if (r.getResponseCode() !== 200) {
+      return ['список не отдался (' + r.getResponseCode() + ')'];
+    }
+    var j = JSON.parse(r.getContentText());
+    return (j.models || []).filter(function (m) {
+      return (m.supportedGenerationMethods || []).indexOf('generateContent') >= 0;
+    }).map(function (m) {
+      return String(m.name).replace('models/', '');
+    }).slice(0, 25);
+  } catch (err) {
+    return ['ошибка: ' + err.message];
   }
-  blob.setName('golos.' + ext);
-
-  var r = UrlFetchApp.fetch(API_BASE + '/audio/transcriptions', {
-    method: 'post',
-    headers: { Authorization: 'Bearer ' + API_KEY },
-    payload: { file: blob, model: MODEL_VOICE, language: 'ru' },
-    muteHttpExceptions: true
-  });
-
-  if (r.getResponseCode() !== 200) {
-    throw new Error('расшифровка вернула ' + r.getResponseCode() + ': ' + r.getContentText().slice(0, 300));
-  }
-  var j = JSON.parse(r.getContentText());
-  return j.text || '';
 }
 
 /** Вытаскивает JSON из ответа модели, даже если она обернула его в ```json. */
