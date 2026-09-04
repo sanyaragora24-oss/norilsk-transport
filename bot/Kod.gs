@@ -326,10 +326,14 @@ function Настроить(tiho) {
       ? 'Связь: Telegram пишет напрямую, ответ мгновенный.'
       : 'НЕ УДАЛОСЬ ПРОПИСАТЬ WEBHOOK: ' + JSON.stringify(r));
   } else {
-    tg('deleteWebhook', { drop_pending_updates: false });
+    // drop_pending_updates: пока бота настраивали, в Telegram копились сообщения.
+    // Без сброса бот ответит на каждое разом — стеной. Начинаем с чистого листа.
+    tg('deleteWebhook', { drop_pending_updates: true });
+    hranilishe().deleteProperty('TG_OFFSET');
     ubratOpros();
     ScriptApp.newTrigger('opros').timeBased().everyMinutes(1).create();
     log.push('Связь: бот сам спрашивает Telegram раз в минуту.');
+    log.push('Накопившиеся до этой минуты сообщения отброшены.');
     log.push('Работает без развёртывания. Ответ приходит в течение минуты.');
     log.push('Хочешь мгновенно — разверни веб-приложение и запусти «Настроить» ещё раз.');
   }
@@ -420,6 +424,36 @@ function Проверка(tiho) {
 
   if (!tiho) otchet('Проверка', log);
   return log;
+}
+
+/**
+ * Полная остановка: снимает все будильники и отключает webhook.
+ * Бот замолкает и перестаёт отвечать вообще. Обратно — «Настроить».
+ */
+function ОстановитьБота() {
+  var snyato = 0;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var f = t.getHandlerFunction();
+    if (f === 'opros' || f === 'utrom' || f === 'УтренняяСводка') {
+      ScriptApp.deleteTrigger(t);
+      snyato++;
+    }
+  });
+
+  var webhook = 'не трогал';
+  if (tokenBota()) {
+    var r = tg('deleteWebhook', { drop_pending_updates: true });
+    webhook = (r && r.ok) ? 'отключён, очередь очищена' : 'отключить не вышло';
+  }
+
+  otchet('Бот остановлен', [
+    'снято будильников: ' + snyato,
+    'webhook: ' + webhook,
+    '',
+    'Теперь он молчит: не отвечает и не присылает сводку.',
+    'Записи в таблице целы, ничего не удалено.',
+    'Включить обратно — «Узелок» → «Настроить».'
+  ]);
 }
 
 /** Снимает будильник опроса, если он стоял. */
@@ -1092,5 +1126,7 @@ function onOpen() {
     .addItem('Настроить', 'Настроить')
     .addItem('Проверка', 'Проверка')
     .addItem('Прислать сводку сейчас', 'УтренняяСводка')
+    .addSeparator()
+    .addItem('Остановить бота', 'ОстановитьБота')
     .addToUi();
 }
