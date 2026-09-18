@@ -1,0 +1,34 @@
+From 47742276aa74461088c6dfd4e6c0f13626048562 Mon Sep 17 00:00:00 2001
+From: Alex Mosin <alexmosin1981@gmail.com>
+Date: Fri, 18 Sep 2026 02:52:17 +0000
+Subject: [PATCH] fix(Outlines): restore screenspace semantics
+
+#2048 changed the `screenspace` uniform from float to bool and turned
+`if (screenspace == 0.0)` into `if (screenspace)`, which swapped the two
+branches: since 9.109.2 the default mode offsets the hull in clip space
+(thickness in pixels, so the documented default of 0.05 is invisible)
+and `screenspace` offsets it in world units. Reported in #2072.
+
+Negate the condition so the default offsets along the normals in world
+units again and `screenspace` gives a zoom-independent line, as the
+docs and the storybook describe.
+---
+ src/core/Outlines.tsx | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/src/core/Outlines.tsx b/src/core/Outlines.tsx
+index 648c29c..a02a9fb 100644
+--- a/src/core/Outlines.tsx
++++ b/src/core/Outlines.tsx
+@@ -39,7 +39,7 @@ const OutlinesMaterial = /* @__PURE__ */ shaderMaterial(
+        tNormal = instanceMatrix * tNormal;
+        tPosition = instanceMatrix * tPosition;
+      #endif
+-     if (screenspace) {
++     if (!screenspace) {
+        vec3 newPosition = tPosition.xyz + tNormal.xyz * thickness;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(newPosition, 1.0); 
+      } else {
+-- 
+2.43.0
+
