@@ -3,6 +3,8 @@
 Готовый вклад в [ahujasid/blender-mcp](https://github.com/ahujasid/blender-mcp) по issue
 [#365](https://github.com/ahujasid/blender-mcp/issues/365).
 
+**Статус:** отправлено, PR [#368](https://github.com/ahujasid/mcp-for-blender/pull/368) из ветки `sanyaragora24-oss/mcp-for-blender:fix/safe-mode-script-directories`.
+
 Файлы:
 
 - `0001-*.patch` — коммит в формате `git format-patch`, применяется на upstream `main` (`6f992ffbca3cb715d111fc640b737b808632273c`).
