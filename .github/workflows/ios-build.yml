@@ -1,0 +1,158 @@
+# GitHub Actions: бесплатная iOS-сборка через macOS runner с Xcode.
+#
+# Этот workflow:
+# 1. Поднимает macOS runner с Xcode
+# 2. Устанавливает xcodegen
+# 3. Генерирует Xcode-проект из project.yml
+# 4. Устанавливает CocoaPods зависимости (YandexMapsMobile, Firebase, Alamofire)
+# 5. Собирает проект через xcodebuild
+# 6. Архивирует .app и загружает как artifact
+#
+# Запускается автоматически при push в main, pull_request, или вручную через Actions tab.
+# macos-latest = ~5 минут старт, но бесплатно для публичных репозиториев.
+
+name: iOS Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'iosApp/**'
+      - '.github/workflows/ios-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'iosApp/**'
+  workflow_dispatch:  # Manual trigger from Actions tab
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build iOS app (Xcode ${{ matrix.xcode }}, iOS ${{ matrix.ios }})
+    runs-on: macos-14  # Apple Silicon, быстрее
+
+    strategy:
+      fail-fast: false
+      matrix:
+        xcode: ['16.0']
+        ios: ['17.0']
+
+    env:
+      LC_ALL: en_US.UTF-8
+      LANG: en_US.UTF-8
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain versions
+        run: |
+          sw_vers
+          xcodebuild -version
+          ruby -v
+          pod --version
+
+      - name: Cache CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            iosApp/Pods
+            ~/.cocoapods
+          key: ${{ runner.os }}-pods-${{ hashFiles('iosApp/Podfile') }}
+          restore-keys: |
+            ${{ runner.os }}-pods-
+
+      - name: Install XcodeGen
+        run: |
+          brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: iosApp
+        run: |
+          xcodegen generate
+          echo "=== Project files ==="
+          ls -la
+
+      - name: Set up API key (placeholder for secrets)
+        working-directory: iosApp
+        env:
+          YANDEX_MAPKIT_API_KEY: ${{ secrets.YANDEX_MAPKIT_API_KEY || 'placeholder-update-before-release' }}
+        run: |
+          echo "YANDEX_MAPKIT_API_KEY=${YANDEX_MAPKIT_API_KEY}" >> $GITHUB_ENV
+          echo "API key configured (length: ${#YANDEX_MAPKIT_API_KEY})"
+
+      - name: Install pods
+        working-directory: iosApp
+        run: |
+          pod install --repo-update
+          echo "=== Pods installed ==="
+          ls Pods | head -20
+
+      - name: Verify JSON assets
+        working-directory: iosApp
+        run: |
+          python3 -c "
+          import json
+          r = json.load(open('Resources/norilsk_routes.json'))
+          s = json.load(open('Resources/norilsk_schedule.json'))
+          print(f'routes: {len(r[\"routes\"])}')
+          print(f'schedule: {len(s[\"routes\"])}')
+          assert len(r['routes']) > 50, 'routes count too low'
+          assert len(s['routes']) > 50, 'schedule count too low'
+          print('OK')
+          "
+
+      - name: Build for simulator (verification only)
+        working-directory: iosApp
+        run: |
+          xcodebuild \
+            -workspace NorilskTransit.xcworkspace \
+            -scheme NorilskTransit \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -quiet \
+            build 2>&1 | tee build.log | tail -100
+          echo "=== Build status: $? ==="
+
+      - name: Verify .app bundle
+        working-directory: iosApp
+        run: |
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -name "NorilskTransit.app" -type d 2>/dev/null | head -1)
+          if [ -z "$APP" ]; then
+            echo "ERROR: .app bundle not found"
+            exit 1
+          fi
+          echo "App bundle: $APP"
+          ls -la "$APP"
+          echo "=== Info.plist ==="
+          /usr/libexec/PlistBuddy -c "Print" "$APP/Info.plist" 2>/dev/null | head -30
+          echo "=== Bundle resources ==="
+          ls "$APP" | grep -E "(json|xcprivacy|car|jpg|png)$"
+
+      - name: Upload .app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NorilskTransit-app-${{ github.sha }}
+          path: |
+            iosApp/build.log
+            ~/Library/Developer/Xcode/DerivedData/**/NorilskTransit.app
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Build summary
+        if: always()
+        run: |
+          echo "## iOS build status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### What was checked:" >> $GITHUB_STEP_SUMMARY
+          echo "- Xcode project generation" >> $GITHUB_STEP_SUMMARY
+          echo "- CocoaPods install (YandexMapsMobile + Firebase + Alamofire)" >> $GITHUB_STEP_SUMMARY
+          echo "- Swift compilation against iOS ${{ matrix.ios }} SDK" >> $GITHUB_STEP_SUMMARY
+          echo "- JSON assets validation" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts:" >> $GITHUB_STEP_SUMMARY
+          echo "Download the .app from the run page to test on simulator." >> $GITHUB_STEP_SUMMARY

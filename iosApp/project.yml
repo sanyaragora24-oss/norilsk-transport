@@ -1,0 +1,58 @@
+# project.yml — XcodeGen описание проекта.
+# Установить xcodegen: brew install xcodegen
+# Сгенерировать workspace: cd iosApp && xcodegen
+#
+# После генерации открыть NorilskTransit.xcworkspace в Xcode.
+
+name: NorilskTransit
+options:
+  bundleIdPrefix: ru.norilsk.transit
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  developmentLanguage: ru
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+    MARKETING_VERSION: "1.2.6"
+    CURRENT_PROJECT_VERSION: "8"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: ""  # Заполнить Apple Developer ID (10-символьный)
+    ENABLE_BITCODE: YES
+
+targets:
+  NorilskTransit:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    resources:
+      - path: Resources
+      - path: ../app/src/main/assets/norilsk_routes.json
+      - path: ../app/src/main/assets/norilsk_schedule.json
+    info:
+      path: Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Норильский транспорт
+        CFBundleShortVersionString: "1.2.6"
+        CFBundleVersion: "8"
+        UILaunchStoryboardName: LaunchScreen
+        UIRequiredDeviceCapabilities: [armv7]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIUserInterfaceStyle: Dark
+        NSLocationWhenInUseUsageDescription: "Нужен для отображения ближайших остановок и работы будильника у выбранной остановки"
+        NSLocationAlwaysAndWhenInUseUsageDescription: "Нужен для отслеживания вашего местоположения, чтобы будить вас за 350 м до нужной остановки"
+        UIBackgroundModes: [location]
+        YANDEX_MAPKIT_API_KEY: "$(YANDEX_MAPKIT_API_KEY)"
+        GoogleServicesFile: GoogleService-Info.plist
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ru.norilsk.transit
+        TARGETED_DEVICE_FAMILY: "1"  # iPhone only
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        SWIFT_OBJC_BRIDGING_HEADER: ""
