@@ -132,6 +132,12 @@ jobs:
           grep -E "YandexMapsMobile|Firebase|Alamofire" Podfile.lock || true
           echo "=== Размер Pods ==="
           du -sh Pods 2>/dev/null || true
+          # Факт установки публикуем как notice: видно через API check-runs/annotations
+          echo "::notice title=resolved-pods::$(grep -E '^\s+- YandexMapsMobile' Podfile.lock | head -3 | tr '\n' ' ')"
+          for slice in Pods/YandexMapsMobile/YandexMapsMobile.xcframework/*/; do
+            [ -d "$slice" ] || continue
+            echo "::notice title=xcframework-slice::$(basename "$slice") $(du -sh "$slice" | cut -f1)"
+          done
 
       - name: Verify JSON assets
         working-directory: iosApp
