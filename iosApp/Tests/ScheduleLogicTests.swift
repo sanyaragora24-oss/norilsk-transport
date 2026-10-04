@@ -11,12 +11,18 @@ final class ScheduleLogicTests: XCTestCase {
         XCTAssertEqual(ScheduleLogic.parseTime("23:59"), 1439)
     }
 
+    func testParseTimeAcceptsSingleDigitHour() {
+        // Формат в данных МУП всегда HH:mm, но час из одной цифры принимаем:
+        // это то же время, просто записанное короче.
+        XCTAssertEqual(ScheduleLogic.parseTime("7:20"), 440)
+    }
+
     func testParseTimeRejectsGarbage() {
-        XCTAssertNil(ScheduleLogic.parseTime("7:20"))
-        XCTAssertNil(ScheduleLogic.parseTime("0720"))
-        XCTAssertNil(ScheduleLogic.parseTime("25:00"))
-        XCTAssertNil(ScheduleLogic.parseTime("12:60"))
+        XCTAssertNil(ScheduleLogic.parseTime("0720"))   // нет разделителя
+        XCTAssertNil(ScheduleLogic.parseTime("25:00"))  // час вне диапазона
+        XCTAssertNil(ScheduleLogic.parseTime("12:60"))  // минуты вне диапазона
         XCTAssertNil(ScheduleLogic.parseTime(""))
+        XCTAssertNil(ScheduleLogic.parseTime("нет данных"))
     }
 
     func testFormatMinutesRoundTrip() {
