@@ -48,16 +48,18 @@ targets:
       # Точка входа @main лежит в корне iosApp и ОБЯЗАНА быть в sources,
       # иначе таргет не содержит entry point и сборка падает.
       - path: NorilskTransitApp.swift
+      # JSON-данные и PrivacyInfo.xcprivacy.
+      # ВАЖНО: у таргета XcodeGen НЕТ ключа `resources` — он молча
+      # игнорируется, и данные не попадают в .app (проверено на CI:
+      # в сгенерированном проекте не было ни одной ссылки на .json).
+      # Поэтому ресурсы подключаем через sources: расширения .json и
+      # .xcprivacy XcodeGen сам относит в Copy Bundle Resources.
+      # Раньше здесь были ссылки на ../app/src/main/assets/*.json —
+      # каталога app/ в репозитории нет, плюс это дублировало ресурсы.
+      - path: Resources
     dependencies:
       - target: NorilskTransitCore
         link: true
-    resources:
-      # JSON-ассеты и PrivacyInfo.xcprivacy лежат в iosApp/Resources.
-      # Раньше здесь были ссылки на ../app/src/main/assets/*.json —
-      # каталога app/ в репозитории нет, плюс это дублировало ресурсы.
-      # buildPhase задан явно: без него JSON не попадали в .app.
-      - path: Resources
-        buildPhase: resources
     info:
       # ВАЖНО: для Plist в XcodeGen ключ `path` ОБЯЗАТЕЛЕН
       # (Sources/ProjectSpec/Plist.swift: path = try jsonDictionary.json(atKeyPath: "path")).
@@ -91,11 +93,10 @@ targets:
     platform: iOS
     sources:
       - path: Tests
-    resources:
-      # Те же JSON, что и в приложении: тесты проверяют реальные данные
+      # Те же JSON, что и в приложении: тесты проверяют реальные данные.
+      # Путь в excludes — относительно пути группы (Resources), см.
+      # SourceGenerator: excludes разрешаются как <basePath>/<group path>/<pattern>.
       - path: Resources
-        # Путь в excludes — относительно пути группы (Resources), см. проектный
-        # SourceGenerator: excludes разрешаются как <basePath>/<group path>/<pattern>
         excludes:
           - PrivacyInfo.xcprivacy
     dependencies:
