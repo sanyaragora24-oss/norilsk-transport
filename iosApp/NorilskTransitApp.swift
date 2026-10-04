@@ -1,13 +1,13 @@
 // NorilskTransitApp.swift
 // Entry point for iOS app.
-// Build: Xcode 16+, iOS 17+ deployment target, YandexMapsMobile 4.45.0-full (CocoaPods).
+// Build: Xcode 16+, iOS 17+ deployment target, YandexMapsMobile 4.45.0-lite (CocoaPods).
 
 import SwiftUI
 import YandexMapsMobile
 
 @main
 struct NorilskTransitApp: App {
-    @StateObject private var routesStore = RoutesStore()
+    @StateObject private var store = TransitStore()
     @StateObject private var locationManager = LocationManager()
     @StateObject private var favoritesStore = FavoritesStore()
 
@@ -39,7 +39,7 @@ struct NorilskTransitApp: App {
     var body: some Scene {
         WindowGroup {
             MapScreen()
-                .environmentObject(routesStore)
+                .environmentObject(store)
                 .environmentObject(locationManager)
                 .environmentObject(favoritesStore)
                 .preferredColorScheme(.dark)

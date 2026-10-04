@@ -1,99 +1,332 @@
-// MapScreen.swift — карта Яндекс с маршрутами автобусов Норильска.
-// Структура соответствует Android-версии (MapScreen.kt).
+// MapScreen.swift — главный экран: карта Яндекс + доступ к маршрутам и остановкам.
 
 import SwiftUI
+import UIKit
 import YandexMapsMobile
-import CoreLocation
+import NorilskTransitCore
 
 struct MapScreen: View {
-    @EnvironmentObject var routesStore: RoutesStore
-    @EnvironmentObject var locationManager: LocationManager
+    @EnvironmentObject private var store: TransitStore
+    @EnvironmentObject private var favorites: FavoritesStore
+    @EnvironmentObject private var locationManager: LocationManager
 
-    @State private var selectedRoute: Route?
+    @State private var selectedVariant: RouteVariant?
+    @State private var detailVariant: RouteVariant?
+    @State private var selectedStop: StopInfo?
     @State private var showRouteList = false
     @State private var showFavorites = false
     @State private var showMenu = false
+    @State private var centerOnUser = false
+    @State private var centerOnStop: MapStopOverlay?
 
     var body: some View {
-        ZStack(alignment: .top) {
-            YandexMapView(routes: routesStore.routes,
-                          selectedRoute: selectedRoute,
-                          userLocation: locationManager.lastLocation)
-                .ignoresSafeArea()
-
-            MapTopBar(
-                weather: locationManager.weather,
-                onMenuTap: { showMenu = true },
-                onFavoritesTap: { showFavorites = true }
+        ZStack(alignment: .bottom) {
+            TransitMapView(
+                routes: mapRoutes,
+                stops: mapStops,
+                fitRouteId: selectedVariant?.id,
+                centerOnUser: $centerOnUser,
+                centerOnStop: $centerOnStop,
+                onStopTap: { stopId in
+                    selectedStop = store.index?.stop(id: stopId)
+                }
             )
+            .ignoresSafeArea()
 
-            VStack {
+            VStack(spacing: 8) {
+                MapTopBar(
+                    weather: locationManager.weather,
+                    onMenuTap: { showMenu = true },
+                    onFavoritesTap: { showFavorites = true }
+                )
+
+                if let message = store.errorMessage {
+                    Text(message)
+                        .font(.footnote)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.red.opacity(0.85), in: Capsule())
+                        .foregroundStyle(.white)
+                }
+
                 Spacer()
-                if showRouteList {
-                    RouteListSheet(
-                        routes: routesStore.routes,
-                        onSelect: { route in
-                            selectedRoute = route
-                            showRouteList = false
-                        },
-                        onClose: { showRouteList = false }
+
+                if let variant = selectedVariant {
+                    SelectedRouteCard(
+                        variant: variant,
+                        onOpen: { detailVariant = variant },
+                        onClose: { selectedVariant = nil }
                     )
-                    .transition(.move(edge: .bottom))
+                }
+
+                mapButtons
+            }
+            .padding()
+        }
+        .sheet(isPresented: $showRouteList) {
+            RouteListScreen(
+                onShowRoute: { variant in
+                    selectedVariant = variant
+                },
+                onShowStop: { stop in
+                    centerOnStop = MapStopOverlay(id: stop.id, lat: stop.lat, lon: stop.lon, title: stop.name)
+                }
+            )
+        }
+        .sheet(item: $detailVariant) { variant in
+            NavigationStack {
+                RouteDetailView(variant: variant) { updated in
+                    selectedVariant = updated
+                }
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Готово") { detailVariant = nil }
+                    }
                 }
             }
         }
-        .sheet(item: $selectedRoute) { route in
-            RouteDetailScreen(route: route)
-        }
-        .sheet(isPresented: $showMenu) {
-            MenuScreen()
+        .sheet(item: $selectedStop) { stop in
+            NavigationStack {
+                StopDetailView(stop: stop) { selected in
+                    selectedStop = nil
+                    centerOnStop = MapStopOverlay(id: selected.id, lat: selected.lat, lon: selected.lon, title: selected.name)
+                }
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Готово") { selectedStop = nil }
+                        }
+                    }
+            }
         }
         .sheet(isPresented: $showFavorites) {
-            FavoritesScreen()
+            FavoritesScreen(
+                onShowRoute: { variant in
+                    selectedVariant = variant
+                },
+                onShowStop: { stop in
+                    centerOnStop = MapStopOverlay(id: stop.id, lat: stop.lat, lon: stop.lon, title: stop.name)
+                }
+            )
         }
-    }
-}
-
-struct YandexMapView: UIViewRepresentable {
-    let routes: [Route]
-    let selectedRoute: Route?
-    let userLocation: CLLocation?
-
-    func makeUIView(context: Context) -> YMKMapView {
-        // YMKMapView(frame:) приходит из ObjC как failable init -> YMKMapView?
-        // UIViewRepresentable требует non-optional, а на практике init не возвращает nil.
-        let mapView = YMKMapView(frame: .zero)!
-        // NOTE: YMKMapView не имеет свойства mapType (было `mapView.mapType = .map` —
-        // такой вызов не компилируется). Тип карты задаётся через YMKMap.mapType при необходимости.
-        let norilsk = YMKPoint(latitude: 69.34, longitude: 88.21)
-        mapView.mapWindow.map.move(with: YMKCameraPosition(target: norilsk, zoom: 11, azimuth: 0, tilt: 0))
-        return mapView
+        .sheet(isPresented: $showMenu) { MenuScreen() }
     }
 
-    func updateUIView(_ uiView: YMKMapView, context: Context) {
-        // ВАЖНО: объекты нужно добавлять в коллекцию ВИДИМОЙ карты.
-        // Раньше Coordinator создавал отдельный YMKMapView() и рисовал в него —
-        // на экране не появлялось ничего.
-        let mapObjects = uiView.mapWindow.map.mapObjects
-        mapObjects.clear()
+    // MARK: - Данные для карты
 
-        for route in routes {
-            let isSelected = selectedRoute?.id == route.id
-            let isVisible = selectedRoute == nil || isSelected
+    private var mapRoutes: [MapRouteOverlay] {
+        guard let index = store.index else { return [] }
+        if let selected = selectedVariant {
+            guard selected.hasGeometry else { return [] }
+            return [
+                MapRouteOverlay(id: selected.id,
+                                points: selected.polyline,
+                                color: UIColor(argb: selected.colorArgb),
+                                isSelected: true)
+            ]
+        }
+        return index.variants
+            .filter { $0.hasGeometry }
+            .map { MapRouteOverlay(id: $0.id, points: $0.polyline, color: UIColor(argb: $0.colorArgb), isSelected: false) }
+    }
 
-            // Геометрия по реальным дорогам (OSM)
-            if route.polyline.count >= 2 {
-                let points = route.polyline.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }
-                let polyline = YMKPolyline(points: points)
-                let polylineObj = mapObjects.addPolyline(with: polyline)
-                // У YMKPolylineMapObject нет свойства strokeColor — только setStrokeColorWith(_:)
-                polylineObj.setStrokeColorWith(UIColor(route.colorArgb))
-                polylineObj.strokeWidth = isSelected ? 6 : 4
-                polylineObj.isVisible = isVisible
+    private var mapStops: [MapStopOverlay] {
+        guard let selected = selectedVariant, selected.hasGeometry else { return [] }
+        return selected.stops.map { MapStopOverlay(id: $0.id, lat: $0.lat, lon: $0.lon, title: $0.name) }
+    }
+
+    // MARK: - Кнопки
+
+    private var mapButtons: some View {
+        HStack(alignment: .bottom, spacing: 12) {
+            Button {
+                showRouteList = true
+            } label: {
+                Label("Маршруты", systemImage: "list.bullet")
+                    .font(.headline)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 12)
+                    .background(.blue, in: Capsule())
+                    .foregroundStyle(.white)
+            }
+
+            Spacer()
+
+            Button {
+                centerOnUser = true
+            } label: {
+                Image(systemName: "location.fill")
+                    .font(.title3)
+                    .padding(12)
+                    .background(.ultraThinMaterial, in: Circle())
             }
         }
     }
 }
+
+// MARK: - Карточка выбранного маршрута
+
+struct SelectedRouteCard: View {
+    let variant: RouteVariant
+    let onOpen: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            RouteBadge(number: variant.number, colorArgb: variant.colorArgb, height: 48)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(variant.title)
+                    .font(.subheadline)
+                    .lineLimit(2)
+                HStack(spacing: 6) {
+                    TagView(text: variant.hasSchedule ? "расписание есть" : "расписаний нет",
+                            color: variant.hasSchedule ? .green : .gray)
+                    if !variant.hasGeometry {
+                        TagView(text: "трека нет", color: .orange)
+                    }
+                }
+            }
+            Spacer()
+            Button("Подробнее", action: onOpen)
+                .font(.footnote)
+            Button(action: onClose) {
+                Image(systemName: "xmark")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(12)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+// MARK: - Обёртка карты
+
+struct MapRouteOverlay: Hashable {
+    let id: String
+    let points: [LatLon]
+    let color: UIColor
+    let isSelected: Bool
+}
+
+struct MapStopOverlay: Hashable {
+    let id: Int
+    let lat: Double
+    let lon: Double
+    let title: String
+}
+
+struct TransitMapView: UIViewRepresentable {
+    let routes: [MapRouteOverlay]
+    let stops: [MapStopOverlay]
+    let fitRouteId: String?
+    @Binding var centerOnUser: Bool
+    @Binding var centerOnStop: MapStopOverlay?
+    let onStopTap: (Int) -> Void
+
+    private static let norilskCenter = YMKPoint(latitude: 69.34, longitude: 88.21)
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onStopTap: onStopTap)
+    }
+
+    func makeUIView(context: Context) -> YMKMapView {
+        // YMKMapView(frame:) приходит из ObjC как failable init -> YMKMapView?
+        let mapView = YMKMapView(frame: .zero)!
+        mapView.mapWindow.map.move(
+            with: YMKCameraPosition(target: Self.norilskCenter, zoom: 11, azimuth: 0, tilt: 0)
+        )
+
+        // Слой геолокации. MapKit хранит слой по слабой ссылке,
+        // поэтому держим его в координаторе.
+        let userLayer = YMKMapKit.sharedInstance().createUserLocationLayer(with: mapView.mapWindow)
+        userLayer.setVisibleWithOn(true)
+        context.coordinator.userLayer = userLayer
+
+        return mapView
+    }
+
+    func updateUIView(_ mapView: YMKMapView, context: Context) {
+        context.coordinator.onStopTap = onStopTap
+
+        let map = mapView.mapWindow.map
+        let objects = map.mapObjects
+        objects.clear()
+
+        // Линии маршрутов
+        for overlay in routes where overlay.points.count >= 2 {
+            let points = overlay.points.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }
+            let polyline = objects.addPolyline(with: YMKPolyline(points: points))
+            // У YMKPolylineMapObject нет свойства strokeColor — только setStrokeColorWith(_:)
+            polyline.setStrokeColorWith(overlay.color)
+            polyline.strokeWidth = overlay.isSelected ? 6 : 3.5
+            polyline.zIndex = overlay.isSelected ? 10 : 1
+        }
+
+        // Остановки выбранного маршрута
+        for stop in stops {
+            let placemark = objects.addPlacemark(with: YMKPoint(latitude: stop.lat, longitude: stop.lon))
+            placemark.userData = stop.id
+            placemark.setTextWithText(stop.title)
+            placemark.zIndex = 20
+            placemark.addTapListener(with: context.coordinator)
+        }
+
+        // Камера: подгоняем под выбранный маршрут, но только при его смене,
+        // иначе карта перескакивала бы при каждом обновлении состояния.
+        if context.coordinator.lastFitRouteId != fitRouteId {
+            context.coordinator.lastFitRouteId = fitRouteId
+            if let fitRouteId = fitRouteId,
+               let overlay = routes.first(where: { $0.id == fitRouteId }),
+               overlay.points.count >= 2 {
+                let points = overlay.points.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }
+                let geometry = YMKGeometry(polyline: YMKPolyline(points: points))
+                let position = map.cameraPosition(with: geometry)
+                map.move(with: position, animation: YMKAnimation(type: .smooth, duration: 0.6))
+            }
+        }
+
+        // Центровка на пользователя по кнопке
+        if centerOnUser {
+            if let position = context.coordinator.userLayer?.cameraPosition() {
+                map.move(with: position, animation: YMKAnimation(type: .smooth, duration: 0.4))
+            }
+            DispatchQueue.main.async { centerOnUser = false }
+        }
+
+        // Центровка на остановке (переход «на карту» из списков)
+        if let stop = centerOnStop {
+            let position = YMKCameraPosition(
+                target: YMKPoint(latitude: stop.lat, longitude: stop.lon),
+                zoom: 16,
+                azimuth: 0,
+                tilt: 0
+            )
+            map.move(with: position, animation: YMKAnimation(type: .smooth, duration: 0.4))
+            DispatchQueue.main.async { centerOnStop = nil }
+        }
+    }
+
+    final class Coordinator: NSObject, YMKMapObjectTapListener {
+        var onStopTap: (Int) -> Void
+        var userLayer: YMKUserLocationLayer?
+        var lastFitRouteId: String?
+
+        init(onStopTap: @escaping (Int) -> Void) {
+            self.onStopTap = onStopTap
+            super.init()
+        }
+
+        func onMapObjectTap(with mapObject: YMKMapObject, point: YMKPoint) -> Bool {
+            if let stopId = mapObject.userData as? Int {
+                onStopTap(stopId)
+                return true
+            }
+            return false
+        }
+    }
+}
+
+// MARK: - Верхняя панель
 
 struct MapTopBar: View {
     let weather: Weather?
@@ -105,17 +338,16 @@ struct MapTopBar: View {
             Button(action: onMenuTap) {
                 Image(systemName: "line.horizontal.3")
                     .font(.title2)
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .padding(8)
-                    .background(Color.black.opacity(0.6), in: Circle())
+                    .background(.black.opacity(0.6), in: Circle())
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(formattedDate()).font(.headline).foregroundColor(.white)
-                if let w = weather {
+                Text(formattedDate()).font(.headline).foregroundStyle(.white)
+                if let weather {
                     HStack(spacing: 6) {
-                        Text("\(Int(w.tempC))°C").foregroundColor(.white)
-                        Text("\(w.windMs) м/с").foregroundColor(.cyan)
-                        Image(systemName: "arrow.clockwise").foregroundColor(.white)
+                        Text("\(Int(weather.tempC))°C").foregroundStyle(.white)
+                        Text("\(weather.windMs) м/с").foregroundStyle(.cyan)
                     }
                     .font(.subheadline)
                 }
@@ -124,9 +356,9 @@ struct MapTopBar: View {
             Button(action: onFavoritesTap) {
                 Image(systemName: "star")
                     .font(.title2)
-                    .foregroundColor(.white)
+                    .foregroundStyle(.white)
                     .padding(8)
-                    .background(Color.black.opacity(0.6), in: Circle())
+                    .background(.black.opacity(0.6), in: Circle())
             }
         }
         .padding(.horizontal)
@@ -134,8 +366,9 @@ struct MapTopBar: View {
     }
 
     private func formattedDate() -> String {
-        let f = DateFormatter()
-        f.dateFormat = "dd.MM HH:mm"
-        return f.string(from: Date())
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd.MM HH:mm"
+        formatter.timeZone = ScheduleLogic.norilskTimeZone()
+        return formatter.string(from: Date())
     }
 }

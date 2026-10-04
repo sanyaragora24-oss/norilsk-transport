@@ -215,6 +215,61 @@ jobs:
           fi
           echo "=== xcodebuild: OK ==="
 
+      - name: Run unit tests
+        working-directory: iosApp
+        run: |
+          set -euo pipefail
+          # Unit-тесты NorilskTransitCoreTests — «логические» (без host-приложения),
+          # поэтому приложение и MapKit не запускаются: проверяются парсеры и
+          # логика расписаний на реальных JSON из Resources.
+          #
+          # Симулятор создаём сами: состав устройств в образе раннера меняется,
+          # поэтому берём последний доступный iPhone и самый свежий iOS-рантайм.
+          DEVICE_NAME="NorilskCI-iPhone"
+          RUNTIME=$(xcrun simctl list runtimes -j | python3 -c '
+          import json, sys
+          d = json.load(sys.stdin)
+          rs = [r for r in d["runtimes"] if r.get("isAvailable") and r["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-")]
+          rs.sort(key=lambda r: [int(x) for x in r["version"].split(".")])
+          print(rs[-1]["identifier"] if rs else "")
+          ')
+          DEVICE_TYPE=$(xcrun simctl list devicetypes -j | python3 -c '
+          import json, sys, re
+          d = json.load(sys.stdin)
+          ds = []
+          for t in d["devicetypes"]:
+              m = re.match(r".*SimDeviceType\.iPhone-(\d+)$", t["identifier"])
+              if m:
+                  ds.append((int(m.group(1)), t["identifier"]))
+          ds.sort()
+          print(ds[-1][1] if ds else "")
+          ')
+          echo "runtime: $RUNTIME"
+          echo "device type: $DEVICE_TYPE"
+          if [ -z "$RUNTIME" ] || [ -z "$DEVICE_TYPE" ]; then
+            echo "::error::Не удалось определить симулятор (runtime=$RUNTIME device=$DEVICE_TYPE)"
+            exit 1
+          fi
+          xcrun simctl delete "$DEVICE_NAME" >/dev/null 2>&1 || true
+          xcrun simctl create "$DEVICE_NAME" "$DEVICE_TYPE" "$RUNTIME"
+          echo "::notice title=simulator::$DEVICE_NAME ($DEVICE_TYPE / $RUNTIME)"
+
+          if ! xcodebuild \
+            -workspace NorilskTransit.xcworkspace \
+            -scheme NorilskTransit \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,name=$DEVICE_NAME" \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            ONLY_ACTIVE_ARCH=YES \
+            test 2>&1 | tee test.log | tail -120 ; then
+            echo "::error::unit-тесты провалились (см. test.log в артефактах)"
+            exit 1
+          fi
+          echo "=== unit tests: OK ==="
+
       # Публикует текст ошибок как annotations: они доступны через GitHub API
       # (check-runs/annotations) даже тогда, когда логи скачать нельзя.
       - name: Publish failure diagnostics
@@ -286,5 +341,6 @@ jobs:
             echo "- CocoaPods: YandexMapsMobile 4.45.0-full установлен"
             echo "- JSON-ассеты: маршруты, расписания, маршрут 31 и 31Э"
             echo "- xcodebuild: компиляция под iOS ${{ matrix.ios }} Simulator"
+            echo "- unit-тесты: NorilskTransitCoreTests (парсеры, индекс, расписания)"
             echo "- .app bundle: проверен и загружен как artifact"
           } >> "$GITHUB_STEP_SUMMARY"

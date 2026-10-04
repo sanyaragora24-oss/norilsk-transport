@@ -1,71 +1,54 @@
-// FavoritesScreen.swift — экран избранного.
-// Этап 1: минимальная реализация (экран требовался MapScreen, но не существовал —
-// из-за этого проект не компилировался). Данные берутся из FavoritesStore/UserDefaults.
+// FavoritesScreen.swift — избранные маршруты и остановки.
+//
+// Хранилище — UserDefaults (FavoritesStore), сами объекты берём из индекса
+// маршрутов: избранное переживает обновление данных и остаётся кликабельным.
 
 import SwiftUI
+import NorilskTransitCore
 
 struct FavoritesScreen: View {
-    @EnvironmentObject private var routesStore: RoutesStore
-    @EnvironmentObject private var favoritesStore: FavoritesStore
+    @EnvironmentObject private var store: TransitStore
+    @EnvironmentObject private var favorites: FavoritesStore
     @Environment(\.dismiss) private var dismiss
 
-    private var favoriteRoutes: [Route] {
-        let ids = Set(favoritesStore.routes)
-        return routesStore.routes.filter { ids.contains($0.id) }
-    }
+    private let onShowRoute: ((RouteVariant) -> Void)?
+    private let onShowStop: ((StopInfo) -> Void)?
 
-    private var favoriteStops: [Stop] {
-        let ids = Set(favoritesStore.stops)
-        var seen = Set<Int>()
-        var result: [Stop] = []
-        for stop in routesStore.routes.flatMap(\.stops) where ids.contains(stop.id) && seen.insert(stop.id).inserted {
-            result.append(stop)
-        }
-        return result
+    init(onShowRoute: ((RouteVariant) -> Void)? = nil,
+         onShowStop: ((StopInfo) -> Void)? = nil) {
+        self.onShowRoute = onShowRoute
+        self.onShowStop = onShowStop
     }
 
     var body: some View {
         NavigationStack {
             Group {
                 if favoriteRoutes.isEmpty && favoriteStops.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "star")
-                            .font(.largeTitle)
-                            .foregroundStyle(.secondary)
-                        Text("Пока нет избранного")
-                            .font(.headline)
-                        Text("Добавьте маршрут или остановку через звёздочку.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding()
+                    PlaceholderStateView(
+                        systemImage: "star",
+                        title: "Пока нет избранного",
+                        message: "Добавьте маршрут или остановку звёздочкой — в списке маршрутов, на экране маршрута или остановки."
+                    )
                 } else {
                     List {
                         if !favoriteRoutes.isEmpty {
                             Section("Маршруты") {
-                                ForEach(favoriteRoutes) { route in
-                                    HStack(spacing: 12) {
-                                        Text(route.number)
-                                            .font(.system(size: 18, weight: .black))
-                                            .foregroundColor(.white)
-                                            .frame(width: 44, height: 44)
-                                            .background(Color(UIColor(route.colorArgb)), in: RoundedRectangle(cornerRadius: 10))
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(route.origin).font(.subheadline)
-                                            Text("→ \(route.destination)").font(.caption).foregroundStyle(.secondary)
-                                        }
+                                ForEach(favoriteRoutes) { variant in
+                                    NavigationLink(value: variant) {
+                                        RouteVariantRow(variant: variant, isFavorite: true)
                                     }
                                 }
+                                .onDelete(perform: deleteRoutes)
                             }
                         }
-
                         if !favoriteStops.isEmpty {
                             Section("Остановки") {
                                 ForEach(favoriteStops) { stop in
-                                    Label(stop.name, systemImage: "mappin.circle")
-                                        .font(.subheadline)
+                                    NavigationLink(value: stop) {
+                                        StopListRow(stop: stop, isFavorite: true)
+                                    }
                                 }
+                                .onDelete(perform: deleteStops)
                             }
                         }
                     }
@@ -78,6 +61,36 @@ struct FavoritesScreen: View {
                     Button("Готово") { dismiss() }
                 }
             }
+            .navigationDestination(for: RouteVariant.self) { variant in
+                RouteDetailView(variant: variant) { selected in
+                    onShowRoute?(selected)
+                    dismiss()
+                }
+            }
+            .navigationDestination(for: StopInfo.self) { stop in
+                StopDetailView(stop: stop) { selected in
+                    onShowStop?(selected)
+                    dismiss()
+                }
+            }
         }
+    }
+
+    private var favoriteRoutes: [RouteVariant] {
+        let ids = Set(favorites.routes)
+        return store.index?.variants.filter { ids.contains($0.id) } ?? []
+    }
+
+    private var favoriteStops: [StopInfo] {
+        let ids = Set(favorites.stops)
+        return store.index?.stops.filter { ids.contains($0.id) } ?? []
+    }
+
+    private func deleteRoutes(at offsets: IndexSet) {
+        for index in offsets { favorites.toggleRoute(favoriteRoutes[index].id) }
+    }
+
+    private func deleteStops(at offsets: IndexSet) {
+        for index in offsets { favorites.toggleStop(favoriteStops[index].id) }
     }
 }

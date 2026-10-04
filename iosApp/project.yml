@@ -23,14 +23,34 @@ settings:
     ENABLE_BITCODE: NO    # bitcode удалён в Xcode 14+, YES ломает линковку SDK Яндекса
 
 targets:
+  # Модели, парсеры и логика расписаний. Сознательно без UIKit/MapKit/SwiftUI:
+  # только Foundation, поэтому покрывается unit-тестами без запуска приложения
+  # и без инициализации MapKit (у которого в CI нет валидного API-ключа).
+  NorilskTransitCore:
+    type: library.static
+    platform: iOS
+    sources:
+      - path: Sources/Core
+    settings:
+      base:
+        # Статическая библиотека: Info.plist не нужен, бандл-идентификатор тоже.
+        SWIFT_VERSION: "5.0"
+        SKIP_INSTALL: YES
+
   NorilskTransit:
     type: application
     platform: iOS
     sources:
       - path: Sources
+        # Core компилируется отдельным модулем (см. таргет выше)
+        excludes:
+          - Sources/Core
       # Точка входа @main лежит в корне iosApp и ОБЯЗАНА быть в sources,
       # иначе таргет не содержит entry point и сборка падает.
       - path: NorilskTransitApp.swift
+    dependencies:
+      - target: NorilskTransitCore
+        link: true
     resources:
       # JSON-ассеты и PrivacyInfo.xcprivacy лежат в iosApp/Resources.
       # Раньше здесь были ссылки на ../app/src/main/assets/*.json —
@@ -61,3 +81,42 @@ targets:
         # LaunchScreen.storyboard в репозитории нет — используем генерируемый Xcode
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
+
+  # Unit-тесты парсинга и расписаний. Тесты «логические» (без host-приложения):
+  # зависят только от NorilskTransitCore, поэтому не запускают MapKit.
+  NorilskTransitCoreTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    resources:
+      # Те же JSON, что и в приложении: тесты проверяют реальные данные
+      - path: Resources
+        excludes:
+          - Resources/PrivacyInfo.xcprivacy
+    dependencies:
+      - target: NorilskTransitCore
+        link: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ru.norilsk.transit.tests
+        GENERATE_INFOPLIST_FILE: YES
+        SWIFT_VERSION: "5.0"
+
+schemes:
+  NorilskTransit:
+    build:
+      targets:
+        NorilskTransit: all
+        NorilskTransitCore: all
+        NorilskTransitCoreTests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - NorilskTransitCoreTests
+    analyze:
+      config: Debug
+    archive:
+      config: Release
