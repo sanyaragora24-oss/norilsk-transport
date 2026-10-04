@@ -179,63 +179,38 @@ jobs:
             -derivedDataPath build/DerivedData \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
+            ONLY_ACTIVE_ARCH=YES \
             build 2>&1 | tee build.log | tail -200 ; then
             echo "::error::xcodebuild завершился с ошибкой (см. build.log в артефактах)"
             exit 1
           fi
           echo "=== xcodebuild: OK ==="
 
-      - name: Show build log on failure
-        if: failure()
-        working-directory: iosApp
-        run: |
-          if [ -f build.log ]; then
-            echo "=== Последние 400 строк build.log ==="
-            tail -400 build.log
-            echo "=== Ошибки ==="
-            grep -n "error:" build.log | head -50 || true
-          fi
-
-      # Публикует текст ошибки как annotations: они доступны через
-      # GitHub API (check-runs/annotations), даже когда логи скачать нельзя.
+      # Публикует текст ошибок как annotations: они доступны через GitHub API
+      # (check-runs/annotations) даже тогда, когда логи скачать нельзя.
       - name: Publish failure diagnostics
         if: failure()
         working-directory: iosApp
         run: |
-          python3 - <<'PY'
-          import glob, re
-
-          def esc(s: str) -> str:
-              return s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
-
-          def emit(title: str, text: str, limit: int = 40) -> None:
-              lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
-              if not lines:
-                  return
-              key = [ln for ln in lines if re.search(r'error|fatal|exception|failed|not found|\[!\]', ln, re.I)]
-              lines = (key or lines)[-limit:]
-              buf, size = [], 0
-              for line in lines:
-                  if size + len(line) > 2500 and buf:
-                      print(f"::error title={esc(title)}::{esc(chr(10).join(buf))}")
-                      buf, size = [], 0
-                  buf.append(line)
-                  size += len(line) + 1
-              if buf:
-                  print(f"::error title={esc(title)}::{esc(chr(10).join(buf))}")
-
-          logs = sorted(set(glob.glob('*.log')))
-          if not logs:
-              print("::error title=no-logs::нет ни одного *.log для диагностики")
-          for path in logs:
-              try:
-                  text = open(path, errors='replace').read()
-              except OSError as exc:
-                  print(f"::error title={esc(path)}::{esc(str(exc))}")
-                  continue
-              print(f"===== {path} ({len(text)} bytes) =====")
-              emit(path, text)
-          PY
+          set +e
+          esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
+          for log in *.log; do
+            [ -f "$log" ] || continue
+            echo "===== $log ($(wc -c < "$log") bytes) ====="
+            # 1) Строки с реальными ошибками компилятора/линковщика
+            grep -E "(^|[^a-zA-Z-])error:|fatal error:|Undefined symbols|No such module|could not build module|BUILD FAILED|clang: error|ld: |swift-build|error:.*generated" "$log" \
+              | cut -c1-300 | head -25 | esc \
+              | while IFS= read -r line; do
+                  [ -n "$line" ] && echo "::error title=$log::$line"
+                done
+            # 2) Хвост лога — там итог BUILD FAILED и список упавших команд
+            echo "----- tail $log -----"
+            tail -25 "$log" | cut -c1-300 | esc \
+              | while IFS= read -r line; do
+                  [ -n "$line" ] && echo "::error title=$log-tail::$line"
+                done
+          done
+          exit 0
 
       - name: Verify .app bundle
         working-directory: iosApp
