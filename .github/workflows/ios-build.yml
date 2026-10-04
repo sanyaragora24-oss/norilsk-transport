@@ -106,7 +106,7 @@ jobs:
         working-directory: iosApp
         run: |
           set -euo pipefail
-          xcodegen generate
+          xcodegen generate 2>&1 | tee xcodegen.log
           if [ ! -d "NorilskTransit.xcodeproj" ]; then
             echo "::error::NorilskTransit.xcodeproj не создан"
             exit 1
@@ -118,7 +118,7 @@ jobs:
         working-directory: iosApp
         run: |
           set -euo pipefail
-          pod install --repo-update
+          pod install --repo-update 2>&1 | tee pod.log
           if [ ! -d "Pods" ] || [ ! -f "NorilskTransit.xcworkspace/contents.xcworkspacedata" ]; then
             echo "::error::pod install не создал Pods/ или .xcworkspace"
             exit 1
@@ -188,6 +188,47 @@ jobs:
             echo "=== Ошибки ==="
             grep -n "error:" build.log | head -50 || true
           fi
+
+      # Публикует текст ошибки как annotations: они доступны через
+      # GitHub API (check-runs/annotations), даже когда логи скачать нельзя.
+      - name: Publish failure diagnostics
+        if: failure()
+        working-directory: iosApp
+        run: |
+          python3 - <<'PY'
+          import glob, re
+
+          def esc(s: str) -> str:
+              return s.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+
+          def emit(title: str, text: str, limit: int = 40) -> None:
+              lines = [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+              if not lines:
+                  return
+              key = [ln for ln in lines if re.search(r'error|fatal|exception|failed|not found|\[!\]', ln, re.I)]
+              lines = (key or lines)[-limit:]
+              buf, size = [], 0
+              for line in lines:
+                  if size + len(line) > 2500 and buf:
+                      print(f"::error title={esc(title)}::{esc(chr(10).join(buf))}")
+                      buf, size = [], 0
+                  buf.append(line)
+                  size += len(line) + 1
+              if buf:
+                  print(f"::error title={esc(title)}::{esc(chr(10).join(buf))}")
+
+          logs = sorted(set(glob.glob('*.log')))
+          if not logs:
+              print("::error title=no-logs::нет ни одного *.log для диагностики")
+          for path in logs:
+              try:
+                  text = open(path, errors='replace').read()
+              except OSError as exc:
+                  print(f"::error title={esc(path)}::{esc(str(exc))}")
+                  continue
+              print(f"===== {path} ({len(text)} bytes) =====")
+              emit(path, text)
+          PY
 
       - name: Verify .app bundle
         working-directory: iosApp

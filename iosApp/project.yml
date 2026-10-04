@@ -37,8 +37,11 @@ targets:
       # каталога app/ в репозитории нет, плюс это дублировало ресурсы.
       - path: Resources
     info:
-      # Info.plist генерируется XcodeGen из properties ниже
-      # (раньше указывался path на несуществующий Resources/Info.plist).
+      # ВАЖНО: для Plist в XcodeGen ключ `path` ОБЯЗАТЕЛЕН
+      # (Sources/ProjectSpec/Plist.swift: path = try jsonDictionary.json(atKeyPath: "path")).
+      # XcodeGen сам создаёт этот файл при генерации и прописывает INFOPLIST_FILE.
+      # Файл генерируемый — он в .gitignore.
+      path: Info.plist
       properties:
         CFBundleDisplayName: Норильский транспорт
         CFBundleShortVersionString: "1.2.6"
