@@ -3,6 +3,7 @@
 
 import Foundation
 import Combine
+import UIKit  // UIColor используется в расширении ниже (цвета маршрутов из JSON)
 
 struct Route: Identifiable, Hashable {
     let id: String           // "2246:2"
