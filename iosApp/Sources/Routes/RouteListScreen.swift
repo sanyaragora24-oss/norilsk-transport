@@ -49,12 +49,13 @@ struct RouteListScreen: View {
             }
             .navigationDestination(for: RouteVariant.self) { variant in
                 RouteDetailView(variant: variant) { selected in
-                    onShowOnMap?(selected)
+                    onShowRoute?(selected)
                     dismiss()
                 }
             }
             .navigationDestination(for: StopInfo.self) { stop in
-                StopDetailView(stop: stop) { _ in
+                StopDetailView(stop: stop) { selected in
+                    onShowStop?(selected)
                     dismiss()
                 }
             }

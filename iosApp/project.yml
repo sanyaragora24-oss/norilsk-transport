@@ -30,7 +30,10 @@ targets:
     type: library.static
     platform: iOS
     sources:
-      - path: Sources/Core
+      # Каталог Core лежит РЯДОМ с Sources, а не внутри него: у приложения в
+      # sources указан весь Sources, и исключать подкаталог пришлось бы glob-ом
+      # относительно пути группы (Sources/Core/**), что легко сломать.
+      - path: Core
     settings:
       base:
         # Статическая библиотека: Info.plist не нужен, бандл-идентификатор тоже.
@@ -42,9 +45,6 @@ targets:
     platform: iOS
     sources:
       - path: Sources
-        # Core компилируется отдельным модулем (см. таргет выше)
-        excludes:
-          - Sources/Core
       # Точка входа @main лежит в корне iosApp и ОБЯЗАНА быть в sources,
       # иначе таргет не содержит entry point и сборка падает.
       - path: NorilskTransitApp.swift
@@ -92,8 +92,10 @@ targets:
     resources:
       # Те же JSON, что и в приложении: тесты проверяют реальные данные
       - path: Resources
+        # Путь в excludes — относительно пути группы (Resources), см. проектный
+        # SourceGenerator: excludes разрешаются как <basePath>/<group path>/<pattern>
         excludes:
-          - Resources/PrivacyInfo.xcprivacy
+          - PrivacyInfo.xcprivacy
     dependencies:
       - target: NorilskTransitCore
         link: true

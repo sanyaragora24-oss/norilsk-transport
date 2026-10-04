@@ -137,6 +137,8 @@ jobs:
           fi
           echo "=== Project files ==="
           ls -la
+          # Диагностика: какие таргеты и схемы реально сгенерированы
+          xcodebuild -project NorilskTransit.xcodeproj -list
 
       - name: Install pods
         working-directory: iosApp
