@@ -265,6 +265,12 @@ def detour_ratio(route):
     return length_m(points) / straight
 
 
+def geometry_hash(route):
+    """Короткий хэш всех точек: одинаковые треки видно сразу, даже если id разные."""
+    payload = "|".join(f"{lat:.6f},{lon:.6f}" for lat, lon in route["points"])
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:8]
+
+
 def consecutive_duplicates(route):
     """Повторы подряд: нормальны на остановках, подозрительны в большом количестве."""
     points = route["points"]
@@ -334,6 +340,7 @@ def describe(route):
         f"{length_m(route['points'])/1000:.1f}",
         f"{detour_ratio(route):.2f}",
         len(route["stops"]),
+        geometry_hash(route),
     ]
 
 
@@ -486,7 +493,7 @@ def report(old_routes, new_routes, old_path, new_path, old_keys, new_keys,
     print("3. МАРШРУТ 31")
     print("=" * 100)
     rows = [describe(r) for r in new_routes if r["number"].startswith("31")]
-    headers = ["id", "номер", "напр.", "конечные", "точек", "км", "изгиб", "ост."]
+    headers = ["id", "номер", "напр.", "конечные", "точек", "км", "изгиб", "ост.", "трек"]
     print_table(rows, headers) if rows else print("в новом файле нет маршрутов 31*")
 
     print()
