@@ -318,17 +318,24 @@ struct TransitMapView: UIViewRepresentable {
 
     final class Coordinator: NSObject, YMKMapObjectTapListener {
         var onStopTap: (Int) -> Void
+        var onRouteTap: ((String) -> Void)?
         var userLayer: YMKUserLocationLayer?
         var lastFitRouteId: String?
 
-        init(onStopTap: @escaping (Int) -> Void) {
+        init(onStopTap: @escaping (Int) -> Void, onRouteTap: ((String) -> Void)? = nil) {
             self.onStopTap = onStopTap
+            self.onRouteTap = onRouteTap
             super.init()
         }
 
         func onMapObjectTap(with mapObject: YMKMapObject, point: YMKPoint) -> Bool {
+            // Тип объекта определяем по userData: Int — остановка, String — маршрут
             if let stopId = mapObject.userData as? Int {
                 onStopTap(stopId)
+                return true
+            }
+            if let routeId = mapObject.userData as? String {
+                onRouteTap?(routeId)
                 return true
             }
             return false
