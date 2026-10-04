@@ -29,6 +29,10 @@ struct MapScreen: View {
                 centerOnStop: $centerOnStop,
                 onStopTap: { stopId in
                     selectedStop = store.index?.stop(id: stopId)
+                },
+                onRouteTap: { routeId in
+                    guard let variant = store.index?.variant(id: routeId) else { return }
+                    selectedVariant = variant
                 }
             )
             .ignoresSafeArea()
@@ -222,11 +226,13 @@ struct TransitMapView: UIViewRepresentable {
     @Binding var centerOnUser: Bool
     @Binding var centerOnStop: MapStopOverlay?
     let onStopTap: (Int) -> Void
+    /// Тап по линии маршрута: возвращает id направления.
+    let onRouteTap: ((String) -> Void)?
 
     private static let norilskCenter = YMKPoint(latitude: 69.34, longitude: 88.21)
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onStopTap: onStopTap)
+        Coordinator(onStopTap: onStopTap, onRouteTap: onRouteTap)
     }
 
     func makeUIView(context: Context) -> YMKMapView {
@@ -247,6 +253,7 @@ struct TransitMapView: UIViewRepresentable {
 
     func updateUIView(_ mapView: YMKMapView, context: Context) {
         context.coordinator.onStopTap = onStopTap
+        context.coordinator.onRouteTap = onRouteTap
 
         let map = mapView.mapWindow.map
         let objects = map.mapObjects
@@ -260,6 +267,9 @@ struct TransitMapView: UIViewRepresentable {
             polyline.setStrokeColorWith(overlay.color)
             polyline.strokeWidth = overlay.isSelected ? 6 : 3.5
             polyline.zIndex = overlay.isSelected ? 10 : 1
+            // Тап по линии выделяет маршрут (навигация «карта -> маршрут»)
+            polyline.userData = overlay.id
+            polyline.addTapListener(with: context.coordinator)
         }
 
         // Остановки выбранного маршрута

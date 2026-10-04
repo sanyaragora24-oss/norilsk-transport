@@ -4,11 +4,13 @@
 // маршрут -> остановка -> маршрут (и наоборот).
 
 import SwiftUI
+import CoreLocation
 import NorilskTransitCore
 
 struct RouteListScreen: View {
     @EnvironmentObject private var store: TransitStore
     @EnvironmentObject private var favorites: FavoritesStore
+    @EnvironmentObject private var locationManager: LocationManager
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
@@ -160,31 +162,83 @@ struct RouteListScreen: View {
 
     // MARK: - Остановки
 
-    private var filteredStops: [StopInfo] {
-        store.index?.searchStops(query) ?? []
+    /// Остановка с расстоянием от пользователя (nil — геолокации нет).
+    private struct StopEntry: Identifiable {
+        let stop: StopInfo
+        let distance: Double?
+
+        var id: Int { stop.id }
+    }
+
+    /// Если геолокация доступна — ближайшие остановки первыми,
+    /// иначе остаётся алфавитный порядок из индекса.
+    private var stopEntries: [StopEntry] {
+        let found = store.index?.searchStops(query) ?? []
+        guard let location = locationManager.lastLocation else {
+            return found.map { StopEntry(stop: $0, distance: nil) }
+        }
+        let lat = location.coordinate.latitude
+        let lon = location.coordinate.longitude
+        return found
+            .map { stop in
+                StopEntry(
+                    stop: stop,
+                    distance: Geo.distanceMeters(fromLat: lat, fromLon: lon, toLat: stop.lat, toLon: stop.lon)
+                )
+            }
+            .sorted { lhs, rhs in
+                guard let left = lhs.distance else { return false }
+                guard let right = rhs.distance else { return true }
+                return left < right
+            }
     }
 
     private var stopsList: some View {
         List {
-            if filteredStops.isEmpty {
+            Section {
+                Text(distanceHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            if stopEntries.isEmpty {
                 Text("Ничего не найдено").foregroundStyle(.secondary)
             }
-            ForEach(filteredStops) { stop in
-                NavigationLink(value: stop) {
-                    StopListRow(stop: stop, isFavorite: favorites.stops.contains(stop.id))
+            ForEach(stopEntries) { entry in
+                NavigationLink(value: entry.stop) {
+                    StopListRow(
+                        stop: entry.stop,
+                        isFavorite: favorites.stops.contains(entry.stop.id),
+                        distanceText: formatted(distance: entry.distance)
+                    )
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button {
-                        favorites.toggleStop(stop.id)
+                        favorites.toggleStop(entry.stop.id)
                     } label: {
-                        Label(favorites.stops.contains(stop.id) ? "Убрать" : "В избранное",
-                              systemImage: favorites.stops.contains(stop.id) ? "star.slash" : "star")
+                        Label(favorites.stops.contains(entry.stop.id) ? "Убрать" : "В избранное",
+                              systemImage: favorites.stops.contains(entry.stop.id) ? "star.slash" : "star")
                     }
                     .tint(.yellow)
                 }
             }
         }
         .listStyle(.insetGrouped)
+    }
+
+    private var distanceHint: String {
+        if locationManager.lastLocation == nil {
+            return "Геолокация недоступна — список по алфавиту. Разрешите доступ к местоположению, чтобы видеть ближайшие остановки первыми."
+        }
+        return "Ближайшие к вам остановки — первыми. Расстояние по прямой, без учёта дорог."
+    }
+
+    private func formatted(distance: Double?) -> String? {
+        guard let distance else { return nil }
+        if distance < 1000 {
+            return "\(Int(distance)) м"
+        }
+        return String(format: "%.1f км", distance / 1000)
     }
 }
 

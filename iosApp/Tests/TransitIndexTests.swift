@@ -108,6 +108,25 @@ final class TransitIndexTests: XCTestCase {
         XCTAssertTrue(routes.allSatisfy { $0.stops.contains { $0.id == stop.id } })
     }
 
+    func testGeoDistanceForOneDegreeOfLatitude() {
+        // Сферическая формула: один градус широты = 2πR/360 ≈ 111 195 м
+        let distance = Geo.distanceMeters(fromLat: 69.0, fromLon: 88.0, toLat: 70.0, toLon: 88.0)
+        XCTAssertEqual(distance, 111_195, accuracy: 50)
+    }
+
+    func testGeoDistanceIsSymmetricAndZeroForSamePoint() {
+        XCTAssertEqual(Geo.distanceMeters(fromLat: 69.34, fromLon: 88.21, toLat: 69.34, toLon: 88.21), 0, accuracy: 0.001)
+        let direct = Geo.distanceMeters(fromLat: 69.34, fromLon: 88.21, toLat: 69.5, toLon: 88.0)
+        let reverse = Geo.distanceMeters(fromLat: 69.5, fromLon: 88.0, toLat: 69.34, toLon: 88.21)
+        XCTAssertEqual(direct, reverse, accuracy: 0.001)
+    }
+
+    func testNearestStopsRespectsLimit() {
+        XCTAssertEqual(index.nearestStops(latitude: 69.34, longitude: 88.21, limit: 3).count, 3)
+        XCTAssertLessThanOrEqual(index.nearestStops(latitude: 69.34, longitude: 88.21, limit: 10_000).count,
+                                 index.stops.count)
+    }
+
     func testNearestStopsAreSortedByDistance() {
         let nearest = index.nearestStops(latitude: 69.34, longitude: 88.21, limit: 5)
         XCTAssertEqual(nearest.count, 5)
