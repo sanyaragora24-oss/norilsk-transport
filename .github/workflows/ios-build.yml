@@ -284,6 +284,25 @@ jobs:
           fi
           echo "=== unit tests: OK ==="
 
+          # Проверяем, что тесты действительно выполнились: пустой прогон или
+          # «0 tests» — это тоже провал, даже если xcodebuild вернул 0.
+          SUMMARY=$(grep -E "Executed [0-9]+ tests" test.log | tail -1 || true)
+          echo "test summary: $SUMMARY"
+          if [ -z "$SUMMARY" ]; then
+            echo "::error title=unit-tests::В test.log нет строки 'Executed N tests' — тесты могли не запуститься"
+            exit 1
+          fi
+          case "$SUMMARY" in
+            *"with 0 failures"*)
+              echo "::notice title=unit-tests::$SUMMARY"
+              ;;
+            *)
+              echo "::error title=unit-tests::$SUMMARY"
+              exit 1
+              ;;
+          esac
+          echo "TEST_SUMMARY=$SUMMARY" >> "$GITHUB_ENV"
+
       # Публикует текст ошибок как annotations: они доступны через GitHub API
       # (check-runs/annotations) даже тогда, когда логи скачать нельзя.
       - name: Publish failure diagnostics
@@ -349,6 +368,6 @@ jobs:
             echo "- CocoaPods: YandexMapsMobile 4.45.0-full установлен"
             echo "- JSON-ассеты: маршруты, расписания, маршрут 31 и 31Э"
             echo "- xcodebuild: компиляция под iOS ${{ matrix.ios }} Simulator"
-            echo "- unit-тесты: NorilskTransitCoreTests (парсеры, индекс, расписания)"
+            echo "- unit-тесты: ${TEST_SUMMARY:-не запускались}"
             echo "- .app bundle: проверен и загружен как artifact"
           } >> "$GITHUB_STEP_SUMMARY"
