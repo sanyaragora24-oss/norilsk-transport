@@ -192,6 +192,19 @@ public struct TransitIndex {
 // MARK: - Геодезия
 
 public enum Geo {
+    /// Длина ломаной по точкам трека, в метрах (сумма отрезков по сфере).
+    public static func polylineLengthMeters(_ points: [LatLon]) -> Double {
+        guard points.count >= 2 else { return 0 }
+        var total = 0.0
+        for index in 1..<points.count {
+            let previous = points[index - 1]
+            let current = points[index]
+            total += distanceMeters(fromLat: previous.lat, fromLon: previous.lon,
+                                    toLat: current.lat, toLon: current.lon)
+        }
+        return total
+    }
+
     /// Расстояние между двумя точками на сфере, в метрах.
     public static func distanceMeters(fromLat: Double, fromLon: Double, toLat: Double, toLon: Double) -> Double {
         let radius = 6_371_000.0

@@ -95,10 +95,22 @@ struct RouteDetailView: View {
                     TagView(text: variant.hasSchedule ? "расписание есть" : "расписания нет",
                             color: variant.hasSchedule ? .green : .gray)
                 }
+                if variant.hasGeometry {
+                    Text(geometrySummary)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer()
         }
         .padding()
+    }
+
+    /// Длина считается по реальному треку из данных, а не «на глаз».
+    private var geometrySummary: String {
+        String(format: "%lld остановок · ≈ %.1f км",
+               Int64(variant.stops.count),
+               variant.lengthMeters / 1000)
     }
 
     private var directionMenu: some View {

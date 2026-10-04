@@ -42,6 +42,9 @@ struct StopDetailView: View {
                 }
             } header: {
                 Text("Маршруты через остановку · \(routes.count)")
+            } footer: {
+                Text("Расписание публикуется по конечным остановкам, а не по каждой: " +
+                     "чтобы увидеть время отправления, откройте нужный маршрут.")
             }
         }
         .listStyle(.insetGrouped)

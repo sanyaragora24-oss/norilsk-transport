@@ -164,6 +164,8 @@ struct MapScreen: View {
                     .background(.blue, in: Capsule())
                     .foregroundStyle(.white)
             }
+            .accessibilityLabel("Список маршрутов")
+            .accessibilityHint("Открывает поиск по маршрутам и остановкам")
 
             Button {
                 showStopsList = true
@@ -174,6 +176,8 @@ struct MapScreen: View {
                     .padding(.vertical, 12)
                     .background(.ultraThinMaterial, in: Capsule())
             }
+            .accessibilityLabel("Остановки")
+            .accessibilityHint("Открывает список остановок, ближайшие — первыми")
 
             Spacer()
 
@@ -185,6 +189,7 @@ struct MapScreen: View {
                     .padding(12)
                     .background(.ultraThinMaterial, in: Circle())
             }
+            .accessibilityLabel("Показать моё местоположение")
         }
     }
 }

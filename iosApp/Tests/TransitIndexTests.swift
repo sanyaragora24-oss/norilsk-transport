@@ -121,6 +121,26 @@ final class TransitIndexTests: XCTestCase {
         XCTAssertEqual(direct, reverse, accuracy: 0.001)
     }
 
+    func testPolylineLength() {
+        let south = LatLon(lat: 69.0, lon: 88.0)
+        let north = LatLon(lat: 70.0, lon: 88.0)
+        XCTAssertEqual(Geo.polylineLengthMeters([south, north]), 111_195, accuracy: 50)
+        // Два отрезка по градусу = удвоенная длина
+        XCTAssertEqual(Geo.polylineLengthMeters([south, north, LatLon(lat: 71.0, lon: 88.0)]),
+                       222_390, accuracy: 100)
+        XCTAssertEqual(Geo.polylineLengthMeters([south]), 0)
+        XCTAssertEqual(Geo.polylineLengthMeters([]), 0)
+    }
+
+    func testVariantLengthIsZeroWithoutGeometry() {
+        let noGeometry = index.variants.filter { !$0.hasGeometry }
+        XCTAssertFalse(noGeometry.isEmpty)
+        XCTAssertTrue(noGeometry.allSatisfy { $0.lengthMeters == 0 })
+
+        let withGeometry = index.variants.filter { $0.hasGeometry }
+        XCTAssertTrue(withGeometry.allSatisfy { $0.lengthMeters > 0 })
+    }
+
     func testNearestStopsRespectsLimit() {
         XCTAssertEqual(index.nearestStops(latitude: 69.34, longitude: 88.21, limit: 3).count, 3)
         XCTAssertLessThanOrEqual(index.nearestStops(latitude: 69.34, longitude: 88.21, limit: 10_000).count,

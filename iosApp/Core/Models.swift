@@ -11,6 +11,11 @@ import Foundation
 public struct LatLon: Hashable, Codable {
     public let lat: Double
     public let lon: Double
+
+    public init(lat: Double, lon: Double) {
+        self.lat = lat
+        self.lon = lon
+    }
 }
 
 // MARK: - Остановка
@@ -150,7 +155,8 @@ public struct RouteVariant: Identifiable, Hashable {
 
     public var hasSchedule: Bool { schedule?.hasSchedule ?? false }
 
-    public var isStarredHint: Bool { hasGeometry }
+    /// Длина трека в метрах (0, если геометрия не опубликована).
+    public var lengthMeters: Double { Geo.polylineLengthMeters(polyline) }
 }
 
 // MARK: - Остановка в индексе
