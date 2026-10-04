@@ -9,6 +9,15 @@ struct MenuScreen: View {
 
     private var variants: [RouteVariant] { store.index?.variants ?? [] }
 
+    /// Без ключа сборка валидна, но тайлы не загрузятся — говорим об этом прямо.
+    private var mapKeyState: String {
+        let raw = Bundle.main.object(forInfoDictionaryKey: "YANDEX_MAPKIT_API_KEY") as? String ?? ""
+        if raw.isEmpty || raw.hasPrefix("$(") {
+            return "не задан"
+        }
+        return "задан"
+    }
+
     private var appVersion: String {
         let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "—"
@@ -41,6 +50,7 @@ struct MenuScreen: View {
                 Section("О приложении") {
                     LabeledContent("Версия", value: appVersion)
                     LabeledContent("Карта", value: "Яндекс MapKit")
+                    LabeledContent("Ключ карты", value: mapKeyState)
                 }
 
                 Section {
