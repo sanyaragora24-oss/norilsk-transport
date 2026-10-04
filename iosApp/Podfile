@@ -8,9 +8,18 @@
 # вида  '~> 4.5'  НЕ МОЖЕТ разрешиться ни в одну версию — именно из-за этого
 # шаг "Install pods" падал в CI с
 #   [!] CocoaPods could not find compatible versions for pod "YandexMapsMobile".
-# Поэтому версия фиксируется полностью.
-# 4.45.0-full — актуальная версия SDK, совпадает с официальным SPM-пакетом
-# yandex/mapkit-ios (тег 4.45.0). Модуль внутри — YandexMapsMobile.
+# Поэтому версия фиксируется полностью. 4.45.0 — актуальная версия SDK
+# (совпадает с официальным SPM-пакетом yandex/mapkit-ios, тег 4.45.0).
+#
+# Вариант lite, а не full:
+#  - lite = карта, пробки, LocationManager, UserLocationLayer — этого достаточно
+#    для полилиний маршрутов и позиции пользователя;
+#  - full добавляет роутинг/поиск/панорамы и весит ~1 ГБ (только симуляторный
+#    слайс YandexMapsMobile.framework — 409 МБ), из-за чего pod install в CI
+#    занимал 35+ минут.
+#  - Модуль в обоих вариантах называется YandexMapsMobile (prepare_command
+#    переименовывает YandexMapsMobileLite.xcframework), так что код не меняется.
+# Когда понадобятся поиск/роутинг — заменить на '4.45.0-full'.
 
 platform :ios, '17.0'
 

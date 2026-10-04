@@ -93,6 +93,7 @@ jobs:
           path: |
             iosApp/Pods
             ~/.cocoapods
+            ~/Library/Caches/CocoaPods
           key: ${{ runner.os }}-pods-${{ hashFiles('iosApp/Podfile') }}
           restore-keys: |
             ${{ runner.os }}-pods-
@@ -118,13 +119,19 @@ jobs:
         working-directory: iosApp
         run: |
           set -euo pipefail
-          pod install --repo-update 2>&1 | tee pod.log
+          # Без --repo-update: CDN trunk резолвит спецификации по требованию,
+          # а полное обновление спецификаций съедает минуты на каждом прогоне.
+          echo "=== pod install started: $(date -u +%H:%M:%S) ==="
+          time pod install 2>&1 | tee pod.log
+          echo "=== pod install finished: $(date -u +%H:%M:%S) ==="
           if [ ! -d "Pods" ] || [ ! -f "NorilskTransit.xcworkspace/contents.xcworkspacedata" ]; then
             echo "::error::pod install не создал Pods/ или .xcworkspace"
             exit 1
           fi
           echo "=== Установленные поды ==="
-          pod list 2>/dev/null | grep -i -E "Yandex|Firebase|Alamofire" || true
+          grep -E "YandexMapsMobile|Firebase|Alamofire" Podfile.lock || true
+          echo "=== Размер Pods ==="
+          du -sh Pods 2>/dev/null || true
 
       - name: Verify JSON assets
         working-directory: iosApp
