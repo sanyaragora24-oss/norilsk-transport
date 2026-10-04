@@ -279,28 +279,40 @@ struct TransitMapView: UIViewRepresentable {
 
         let map = mapView.mapWindow.map
         let objects = map.mapObjects
-        objects.clear()
 
-        // Линии маршрутов
-        for overlay in routes where overlay.points.count >= 2 {
-            let points = overlay.points.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }
-            let polyline = objects.addPolyline(with: YMKPolyline(points: points))
-            // У YMKPolylineMapObject нет свойства strokeColor — только setStrokeColorWith(_:)
-            polyline.setStrokeColorWith(overlay.color)
-            polyline.strokeWidth = overlay.isSelected ? 6 : 3.5
-            polyline.zIndex = overlay.isSelected ? 10 : 1
-            // Тап по линии выделяет маршрут (навигация «карта -> маршрут»)
-            polyline.userData = overlay.id
-            polyline.addTapListener(with: context.coordinator)
+        // Перерисовываем только если состав объектов реально изменился:
+        // иначе 54 полилинии с тысячами точек пересоздавались бы при каждом
+        // обновлении SwiftUI (например, при каждом тике таймера расписаний).
+        let signature = routes.map { "\($0.id)-\($0.isSelected)-\($0.points.count)" }.joined(separator: ",")
+            + "|" + stops.map { String($0.id) }.joined(separator: ",")
+        let shouldRedraw = context.coordinator.lastDrawSignature != signature
+        if shouldRedraw {
+            context.coordinator.lastDrawSignature = signature
+            objects.clear()
         }
 
-        // Остановки выбранного маршрута
-        for stop in stops {
-            let placemark = objects.addPlacemark(with: YMKPoint(latitude: stop.lat, longitude: stop.lon))
-            placemark.userData = stop.id
-            placemark.setTextWithText(stop.title)
-            placemark.zIndex = 20
-            placemark.addTapListener(with: context.coordinator)
+        if shouldRedraw {
+            // Линии маршрутов
+            for overlay in routes where overlay.points.count >= 2 {
+                let points = overlay.points.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }
+                let polyline = objects.addPolyline(with: YMKPolyline(points: points))
+                // У YMKPolylineMapObject нет свойства strokeColor — только setStrokeColorWith(_:)
+                polyline.setStrokeColorWith(overlay.color)
+                polyline.strokeWidth = overlay.isSelected ? 6 : 3.5
+                polyline.zIndex = overlay.isSelected ? 10 : 1
+                // Тап по линии выделяет маршрут (навигация «карта -> маршрут»)
+                polyline.userData = overlay.id
+                polyline.addTapListener(with: context.coordinator)
+            }
+
+            // Остановки выбранного маршрута
+            for stop in stops {
+                let placemark = objects.addPlacemark(with: YMKPoint(latitude: stop.lat, longitude: stop.lon))
+                placemark.userData = stop.id
+                placemark.setTextWithText(stop.title)
+                placemark.zIndex = 20
+                placemark.addTapListener(with: context.coordinator)
+            }
         }
 
         // Камера: подгоняем под выбранный маршрут, но только при его смене,
@@ -343,6 +355,8 @@ struct TransitMapView: UIViewRepresentable {
         var onRouteTap: ((String) -> Void)?
         var userLayer: YMKUserLocationLayer?
         var lastFitRouteId: String?
+        /// Подпись последнего нарисованного состава объектов (чтобы не перерисовывать зря).
+        var lastDrawSignature: String?
 
         init(onStopTap: @escaping (Int) -> Void, onRouteTap: ((String) -> Void)? = nil) {
             self.onStopTap = onStopTap

@@ -203,6 +203,10 @@ struct ScheduleTabView: View {
     let variant: RouteVariant
     @Binding var dayType: ScheduleDayType
 
+    /// Текущее норильское время; обновляется по таймеру, чтобы обратный отсчёт не застывал.
+    @State private var nowMinutes: Int = ScheduleLogic.minutesNow()
+    private let ticker = Timer.publish(every: 30, on: .main, in: .common).autoconnect()
+
     private struct DepartureGroup: Identifiable {
         let terminal: String
         let times: [Int]
@@ -253,13 +257,19 @@ struct ScheduleTabView: View {
 
                     ForEach(schedule.timetable) { entry in
                         Section {
-                            timesGrid(times: dayType == .weekday ? entry.weekday : entry.weekend)
+                            timesGrid(
+                                times: dayType == .weekday ? entry.weekday : entry.weekend,
+                                highlightFrom: dayType == todayDayType ? nowMinutes : nil
+                            )
                         } header: {
                             Text(entry.terminal)
                         }
                     }
                 }
                 .listStyle(.insetGrouped)
+                .onReceive(ticker) { _ in
+                    nowMinutes = ScheduleLogic.minutesNow()
+                }
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Label("Расписание не опубликовано", systemImage: "clock.badge.questionmark")
@@ -275,7 +285,11 @@ struct ScheduleTabView: View {
         }
     }
 
-    private var nowMinutes: Int { ScheduleLogic.minutesNow() }
+    /// Какой тип дня сегодня в Норильске (нужно, чтобы не подсвечивать
+    /// «ближайшее» в колонке, которую пользователь просто просматривает).
+    private var todayDayType: ScheduleDayType {
+        ScheduleLogic.isWeekendNow() ? .weekend : .weekday
+    }
 
     private var upcomingDescription: String {
         "Сейчас \(ScheduleLogic.formatMinutes(nowMinutes))."
@@ -294,18 +308,23 @@ struct ScheduleTabView: View {
     }
 
     @ViewBuilder
-    private func timesGrid(times: [String]) -> some View {
+    private func timesGrid(times: [String], highlightFrom: Int? = nil) -> some View {
         let minutes = ScheduleLogic.normalizedTimes(times)
         if minutes.isEmpty {
             Text("Нет данных").font(.footnote).foregroundStyle(.secondary)
         } else {
+            // Подсвечиваем ближайший рейс, но только если смотрим сегодняшний день
+            let next = highlightFrom.flatMap { now in minutes.first { $0 >= now } }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 58), spacing: 8)], spacing: 8) {
                 ForEach(minutes, id: \.self) { value in
                     Text(ScheduleLogic.formatMinutes(value))
                         .font(.footnote.monospacedDigit())
                         .padding(.vertical, 4)
                         .frame(maxWidth: .infinity)
-                        .background(Color(.systemGray6), in: RoundedRectangle(cornerRadius: 6))
+                        .background(
+                            value == next ? Color.accentColor.opacity(0.3) : Color(.systemGray6),
+                            in: RoundedRectangle(cornerRadius: 6)
+                        )
                 }
             }
             .padding(.vertical, 2)

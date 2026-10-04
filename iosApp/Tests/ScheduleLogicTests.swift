@@ -48,6 +48,24 @@ final class ScheduleLogicTests: XCTestCase {
         XCTAssertEqual(ScheduleLogic.minutes(of: date, calendar: calendar), 14 * 60 + 35)
     }
 
+    func testNorilskTimeIsUtcPlus7() {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        // 12:00 UTC -> 19:00 в Норильске (UTC+7, переводов часов нет)
+        let date = utc.date(from: DateComponents(year: 2025, month: 1, day: 15, hour: 12, minute: 0))!
+        XCTAssertEqual(ScheduleLogic.minutesNow(date), 19 * 60)
+    }
+
+    func testNorilskWeekendIsDetectedInLocalTime() {
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0)!
+        // 18.01.2025 — суббота; полдень UTC внутри тех же суток и в UTC+7
+        let saturday = utc.date(from: DateComponents(year: 2025, month: 1, day: 18, hour: 12))!
+        XCTAssertTrue(ScheduleLogic.isWeekendNow(saturday))
+        let wednesday = utc.date(from: DateComponents(year: 2025, month: 1, day: 15, hour: 12))!
+        XCTAssertFalse(ScheduleLogic.isWeekendNow(wednesday))
+    }
+
     func testNormalizedTimesSortsAndDeduplicates() {
         let times = ["10:00", "07:20", "07:20", "мусор", "06:05"]
         XCTAssertEqual(ScheduleLogic.normalizedTimes(times), [365, 440, 600])
