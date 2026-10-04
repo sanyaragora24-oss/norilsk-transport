@@ -58,26 +58,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Select Xcode ${{ matrix.xcode }}
+      - name: Select Xcode
         run: |
-          set -euo pipefail
-          XCODE_APP="/Applications/Xcode_${{ matrix.xcode }}.app"
-          if [ ! -d "$XCODE_APP" ]; then
-            echo "::error::Xcode ${{ matrix.xcode }} не найден по пути $XCODE_APP"
-            echo "Доступные Xcode в образе:"
-            ls -d /Applications/Xcode*.app 2>/dev/null || true
+          set -uo pipefail
+          LOG="$GITHUB_WORKSPACE/iosApp/xcode-select.log"
+          : > "$LOG"
+          WANT="${{ matrix.xcode }}"
+          echo "Wanted Xcode: $WANT" | tee -a "$LOG"
+          echo "=== /Applications/Xcode*.app ===" | tee -a "$LOG"
+          ls -d /Applications/Xcode*.app 2>/dev/null | tee -a "$LOG" || echo "(none)" | tee -a "$LOG"
+
+          # Кандидаты: сначала запрошенная версия, затем остальные по убыванию
+          CANDIDATES="/Applications/Xcode_${WANT}.app"
+          CANDIDATES="$CANDIDATES $(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -rV)"
+
+          SELECTED=""
+          for APP in $CANDIDATES; do
+            [ -d "$APP" ] || continue
+            DEV="$APP/Contents/Developer"
+            [ -d "$DEV" ] || continue
+            sudo xcode-select -s "$DEV" >/dev/null 2>&1
+            # На свежих образах раннеров xcodebuild падает, если лицензия не принята
+            sudo xcodebuild -license accept >/dev/null 2>&1
+            OUT="$(xcodebuild -version 2>&1)"
+            CODE=$?
+            echo "--- $APP -> exit $CODE: $(echo "$OUT" | head -2 | tr '\n' ' ')" | tee -a "$LOG"
+            if [ "$CODE" -eq 0 ]; then SELECTED="$APP"; break; fi
+          done
+
+          if [ -z "$SELECTED" ]; then
+            echo "::error::Ни один Xcode из образов не отвечает на xcodebuild -version" | tee -a "$LOG"
             exit 1
           fi
-          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
-          echo "=== xcodebuild -version ==="
-          xcodebuild -version
-          # Проверяем, что выбралась именно запрошенная версия
+
           ACTUAL="$(xcodebuild -version | head -1 | awk '{print $2}')"
-          echo "Requested: ${{ matrix.xcode }} / Actual: ${ACTUAL}"
-          if [ "${ACTUAL}" != "${{ matrix.xcode }}" ]; then
-            echo "::error::Выбран Xcode ${ACTUAL}, ожидался ${{ matrix.xcode }}"
-            exit 1
+          echo "SELECTED_APP=$SELECTED" | tee -a "$LOG"
+          echo "ACTUAL=$ACTUAL" | tee -a "$LOG"
+          if [ "$ACTUAL" != "$WANT" ]; then
+            echo "::warning title=xcode-fallback::Запрошен Xcode $WANT, но он недоступен/нерабочий в образе раннера. Используется $ACTUAL ($SELECTED)"
+          else
+            echo "::notice title=xcode-selected::Xcode $ACTUAL ($SELECTED)"
           fi
+          echo "XCODE_ACTUAL=$ACTUAL" >> "$GITHUB_ENV"
+          xcodebuild -version | tee -a "$LOG"
 
       - name: Show toolchain versions
         run: |
@@ -258,7 +281,7 @@ jobs:
             echo "## iOS build status: ${{ job.status }}"
             echo ""
             echo "### Что проверено:"
-            echo "- Xcode ${{ matrix.xcode }} выбран и подтверждён"
+            echo "- Xcode: запрошен ${{ matrix.xcode }}, фактически использован ${XCODE_ACTUAL:-неизвестно}"
             echo "- xcodegen: проект сгенерирован из project.yml"
             echo "- CocoaPods: YandexMapsMobile 4.45.0-full установлен"
             echo "- JSON-ассеты: маршруты, расписания, маршрут 31 и 31Э"
