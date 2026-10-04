@@ -12,7 +12,17 @@
 Если --old не задан явно, сводка по新旧 печатается для одного файла
 (режим «только новый»), что удобно для первичного осмотра.
 
+Пример полной приёмки production-набора:
+
+  python3 iosApp/Scripts/compare_routes.py \
+      --new ~/Downloads/norilsk_routes.json \
+      --new-schedule ~/Downloads/norilsk_schedule.json \
+      --sha256 F3729C30... --schedule-sha256 23739BBA... \
+      --expect-routes 62 \
+      --expect-points "3467:0=455,3467:1=400,3467:2=575,3467:3=521,3467:4=580,3467:5=477"
+
 Отчёт содержит ровно те разделы, которые нужны для приёмки:
+  0. сверка с ожиданиями: SHA-256, число направлений, точки 31Э
   1. количество направлений и схема файла
   2. добавленные / удалённые / изменённые ID
   3. маршрут 31
@@ -21,6 +31,7 @@
   6. остановки
   7. подозрительные прямые линии
   8. сверка с norilsk_schedule.json (у кого нет геометрии / нет расписания)
+  9. расписания: старый файл против нового (добавлено/удалено/изменено)
 """
 
 from __future__ import annotations
@@ -201,6 +212,29 @@ def load_schedules(path: Path):
     return result, data_date
 
 
+def sha256_file(path: Path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def parse_expect_points(text):
+    """'3467:0=455,3467:1=400' -> {'3467:0': 455, '3467:1': 400}."""
+    result = {}
+    for chunk in (text or "").replace(";", ",").split(","):
+        chunk = chunk.strip()
+        if "=" not in chunk:
+            continue
+        rid, count = chunk.split("=", 1)
+        try:
+            result[rid.strip()] = int(count.strip())
+        except ValueError:
+            print(f"   не понял ожидание: {chunk!r}")
+    return result
+
+
 # --------------------------------------------------------------------------- геометрия
 
 def haversine(a, b):
@@ -301,6 +335,103 @@ def describe(route):
         f"{detour_ratio(route):.2f}",
         len(route["stops"]),
     ]
+
+
+def print_checks(new_path, new_routes, expect_sha, expect_routes, expect_points,
+                 schedule_path, schedule_sha):
+    """Раздел 0: сверка файла с тем, что мы ждём от production-набора."""
+    print("=" * 100)
+    print("0. ПРОВЕРКА ОЖИДАНИЙ (SHA-256, число направлений, точки 31Э)")
+    print("=" * 100)
+
+    actual = sha256_file(new_path)
+    print(f"файл маршрутов: {new_path}")
+    print(f"  SHA-256: {actual}")
+    if expect_sha:
+        same = actual.lower() == expect_sha.lower()
+        print(f"  ожидался: {expect_sha.lower()}  ->  {'СОВПАЛ' if same else 'НЕ СОВПАЛ'}")
+    else:
+        print("  ожидаемый SHA-256 не задан (--sha256)")
+
+    if expect_routes is not None:
+        same = len(new_routes) == expect_routes
+        print(f"  число направлений: ожидалось {expect_routes}, в файле {len(new_routes)} "
+              f"-> {'СОВПАЛО' if same else 'НЕ СОВПАЛО'}")
+    else:
+        print(f"  число направлений: {len(new_routes)} (ожидание не задано, --expect-routes)")
+
+    if expect_points:
+        by_id = {r["id"]: r for r in new_routes}
+        rows, bad = [], 0
+        for rid, expected in expect_points.items():
+            route = by_id.get(rid)
+            actual_points = len(route["points"]) if route else None
+            if actual_points is None:
+                verdict, count_text = "НЕТ В ФАЙЛЕ", "-"
+                bad += 1
+            elif actual_points == expected:
+                verdict, count_text = "ok", str(actual_points)
+            else:
+                verdict, count_text = "НЕ СОВПАЛО", str(actual_points)
+                bad += 1
+            rows.append([rid, route["number"] if route else "-", expected, count_text, verdict])
+        print(f"\n  ожидаемые точки геометрии ({len(expect_points)} проверок, расхождений: {bad}):")
+        print_table(rows, ["id", "номер", "ожидалось", "в файле", "вердикт"])
+
+    if schedule_path and schedule_path.exists():
+        print(f"\nфайл расписаний: {schedule_path}")
+        sched_sha = sha256_file(schedule_path)
+        print(f"  SHA-256: {sched_sha}")
+        if schedule_sha:
+            same = sched_sha.lower() == schedule_sha.lower()
+            print(f"  ожидался: {schedule_sha.lower()}  ->  {'СОВПАЛ' if same else 'НЕ СОВПАЛ'}")
+
+
+def report_schedules(old, new, old_path, new_path, old_date, new_date):
+    """Раздел 9: чем новый файл расписаний отличается от текущего."""
+    print()
+    print("=" * 100)
+    print("9. РАСПИСАНИЯ: СТАРЫЙ vs НОВЫЙ")
+    print("=" * 100)
+    print(f"старый: {old_path} ({len(old)} записей, dataDate {old_date})")
+    print(f"новый:  {new_path} ({len(new)} записей, dataDate {new_date})")
+    print(f"разница записей: {len(new) - len(old):+d}")
+
+    added = sorted(set(new) - set(old))
+    removed = sorted(set(old) - set(new))
+    print(f"\nдобавлены ({len(added)}): {added}")
+    print(f"удалены  ({len(removed)}): {removed}")
+
+    rows = []
+    for rid in sorted(set(old) & set(new)):
+        before, after = old[rid], new[rid]
+        diffs = []
+        if before["number"] != after["number"]:
+            diffs.append(f"номер {before['number']}->{after['number']}")
+        if before["hasSchedule"] != after["hasSchedule"]:
+            diffs.append(f"hasSchedule {before['hasSchedule']}->{after['hasSchedule']}")
+        if before["departures"] != after["departures"]:
+            diffs.append(f"рейсов {before['departures']}->{after['departures']}")
+        if before["terminals"] != after["terminals"]:
+            diffs.append(f"терминалов {before['terminals']}->{after['terminals']}")
+        if before["terminal_names"] != after["terminal_names"]:
+            diffs.append("состав терминалов")
+        if diffs:
+            rows.append([rid, after["number"], before["departures"], after["departures"],
+                         "; ".join(diffs)[:58]])
+
+    print(f"\nизменены ({len(rows)}):")
+    if rows:
+        print_table(rows, ["id", "номер", "рейсов было", "рейсов стало", "что изменилось"])
+
+    print(f"\nвсего рейсов: было {sum(s['departures'] for s in old.values())}, "
+          f"стало {sum(s['departures'] for s in new.values())}")
+    for label, source in (("старый", old), ("новый", new)):
+        empty_declared = sum(1 for s in source.values() if not s["hasSchedule"])
+        empty_suspicious = [i for i, s in source.items()
+                            if s["hasSchedule"] and s["departures"] == 0]
+        print(f"  {label}: hasSchedule=false у {empty_declared}; "
+              f"hasSchedule=true без рейсов: {len(empty_suspicious)} {empty_suspicious}")
 
 
 def report(old_routes, new_routes, old_path, new_path, old_keys, new_keys,
@@ -472,6 +603,13 @@ def main():
                         help="путь к norilsk_schedule.json для раздела 8")
     parser.add_argument("--no-schedule", action="store_true",
                         help="не печатать раздел 8 (сверку с расписаниями)")
+    parser.add_argument("--new-schedule", type=Path,
+                        help="путь к новому norilsk_schedule.json (включает раздел 9)")
+    parser.add_argument("--sha256", help="ожидаемый SHA-256 нового файла маршрутов")
+    parser.add_argument("--schedule-sha256", help="ожидаемый SHA-256 файла расписаний")
+    parser.add_argument("--expect-routes", type=int, help="ожидаемое число направлений")
+    parser.add_argument("--expect-points",
+                        help="ожидаемое число точек, например '3467:0=455,3467:1=400'")
     args = parser.parse_args()
 
     if not args.new.exists():
@@ -487,16 +625,35 @@ def main():
     else:
         print("старый файл не найден — печатаю только новый")
         old_routes, old_top = [], []
+
+    # Расписания: если передан новый файл — он становится основным для разделов 8 и 9.
     schedules = schedule_date = None
     if not args.no_schedule and args.schedule.exists():
         schedules, schedule_date = load_schedules(args.schedule)
     elif not args.no_schedule:
         print(f"расписания не найдены: {args.schedule} — раздел 8 пропущен")
 
+    new_schedules = None
+    schedule_path = args.schedule
+    if args.new_schedule:
+        if not args.new_schedule.exists():
+            raise SystemExit(f"нет файла расписаний: {args.new_schedule}")
+        new_schedules, new_date = load_schedules(args.new_schedule)
+        schedules, schedule_date, schedule_path = new_schedules, new_date, args.new_schedule
+
+    print()
+    print_checks(args.new, new_routes, args.sha256, args.expect_routes,
+                 parse_expect_points(args.expect_points), schedule_path, args.schedule_sha256)
+
     print()
 
     report(old_routes, new_routes, args.old, args.new, old_top, new_top,
-           schedules, args.schedule, schedule_date)
+           schedules, schedule_path, schedule_date)
+
+    if new_schedules is not None and schedules is not None:
+        old_schedules, old_date = load_schedules(args.schedule)
+        report_schedules(old_schedules, new_schedules, args.schedule, args.new_schedule,
+                         old_date, new_date)
 
 
 if __name__ == "__main__":
