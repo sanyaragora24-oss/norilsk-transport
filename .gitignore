@@ -1,0 +1,33 @@
+# --- Xcode ---
+build/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+xcuserdata/
+*.moved-aside
+*.xccheckout
+*.xcscmblueprint
+# генерируется xcodegen
+iosApp/*.xcodeproj/
+iosApp/*.xcworkspace/
+iosApp/Info.plist
+iosApp/build.log
+
+# --- CocoaPods ---
+iosApp/Pods/
+
+# --- Secrets / локальные ключи ---
+GoogleService-Info.plist
+*.jks
+*.keystore
+app/upload-key.jks
+local.properties
+.env
+.env.*
+
+# --- Прочее ---
+.DS_Store
+*.swp

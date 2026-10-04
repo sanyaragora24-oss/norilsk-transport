@@ -13,8 +13,10 @@ SwiftUI каркас iOS-версии приложения «Норильски�
   - `RouteListSheet.swift` — список с поиском и табами Маршруты/Остановки
   - `RouteDetailScreen.swift` — детали + расписание (заглушка)
 - `Sources/Stop/StopScreen.swift` — будильник у остановки (CLCircularRegion — TODO)
+- `Sources/Menu/MenuScreen.swift` — экран меню
+- `Sources/Favorites/FavoritesScreen.swift` — экран избранного
 - `Resources/` — JSON-ассеты + `PrivacyInfo.xcprivacy`
-- `Podfile` — YandexMapsMobile, Firebase, Alamofire, SwiftyJSON
+- `Podfile` — YandexMapsMobile `4.45.0-full` (Firebase/Alamofire/SwiftyJSON — следующие этапы)
 - `project.yml` — XcodeGen описание проекта
 
 ## Сборка локально (нужен Mac + Xcode)
@@ -31,10 +33,12 @@ open NorilskTransit.xcworkspace
 
 ## CI (бесплатно через GitHub Actions)
 
-Workflow `.github/workflows/ios-build.yml` запускается автоматически при push в main:
-- macos-14 раннер
-- xcodegen → pod install → xcodebuild
-- Артефакт `.app` доступен на странице Actions
+Workflow `.github/workflows/ios-build.yml` запускается при push в `main` и `arena/**`,
+а также вручную (Actions → iOS Build → Run workflow):
+- macos-14 раннер, Xcode фиксированной версии (проверяется через `xcode-select`)
+- xcodegen → pod install → xcodebuild (iOS Simulator, `generic/platform=iOS Simulator`)
+- Любая ошибка `xcodebuild` роняет workflow; отсутствие `.app` считается ошибкой
+- Артефакт `.app` + `build.log` доступны на странице Actions
 
 ## Что ещё нужно
 

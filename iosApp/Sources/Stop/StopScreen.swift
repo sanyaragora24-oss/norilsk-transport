@@ -2,7 +2,6 @@
 
 import SwiftUI
 import CoreLocation
-
 struct StopScreen: View {
     let stop: Stop
     let distance: String?

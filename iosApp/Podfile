@@ -1,32 +1,43 @@
 # Podfile для iosApp
-# Запустить: pod install в директории iosApp после открытия .xcworkspace
+# Запустить: cd iosApp && xcodegen && pod install
+#
+# ВАЖНО по YandexMapsMobile:
+# Все версии пода (272 штуки) публикуются ТОЛЬКО с суффиксом варианта:
+#   -lite / -full / -navikit / -flutter, например 4.45.0-full
+# CocoaPods/Gem считает такие версии pre-release, поэтому ограничение
+# вида  '~> 4.5'  НЕ МОЖЕТ разрешиться ни в одну версию — именно из-за этого
+# шаг "Install pods" падал в CI с
+#   [!] CocoaPods could not find compatible versions for pod "YandexMapsMobile".
+# Поэтому версия фиксируется полностью.
+# 4.45.0-full — актуальная версия SDK, совпадает с официальным SPM-пакетом
+# yandex/mapkit-ios (тег 4.45.0). Модуль внутри — YandexMapsMobile.
 
 platform :ios, '17.0'
 
 target 'NorilskTransit' do
   use_frameworks!
 
-  # Яндекс MapKit iOS SDK
-  pod 'YandexMapsMobile', '~> 4.5'
+  # Яндекс MapKit iOS SDK (iOS 15.0+, vendored YandexMapsMobile.xcframework)
+  pod 'YandexMapsMobile', '4.45.0-full'
 
-  # Firebase (Crashlytics, Messaging, Analytics)
-  pod 'Firebase/Crashlytics'
-  pod 'Firebase/Messaging'
-  pod 'Firebase/Analytics'
-
-  # Alamofire — HTTP
-  pod 'Alamofire', '~> 5.9'
-
-  # SwiftyJSON — парсинг
-  pod 'SwiftyJSON', '~> 5.0'
+  # Ниже — зависимости следующих этапов. Сейчас они отключены намеренно:
+  # этап 1 = только стабильная сборка. Ничего из этого не импортируется
+  # в Sources/, так что удаление не ломает код.
+  #
+  # pod 'Firebase/Crashlytics'
+  # pod 'Firebase/Messaging'
+  # pod 'Firebase/Analytics'
+  # pod 'Alamofire', '~> 5.9'
+  # pod 'SwiftyJSON', '~> 5.0'
 end
 
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '17.0'
-      # Разрешаем bitcode для YandexMapsMobile
-      config.build_settings['ENABLE_BITCODE'] = 'YES'
+      # Bitcode удалён в Xcode 14+, а YandexMapsMobile поставляется без него:
+      # ENABLE_BITCODE=YES гарантированно ломает линковку на device/archive.
+      config.build_settings['ENABLE_BITCODE'] = 'NO'
       config.build_settings['SWIFT_VERSION'] = '5.0'
     end
   end

@@ -61,42 +61,34 @@ struct YandexMapView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> YMKMapView {
         let mapView = YMKMapView(frame: .zero)
-        mapView.mapType = .map
-        // Move to Norilsk
+        // NOTE: YMKMapView не имеет свойства mapType (было `mapView.mapType = .map` —
+        // такой вызов не компилируется). Тип карты задаётся через YMKMap.mapType при необходимости.
         let norilsk = YMKPoint(latitude: 69.34, longitude: 88.21)
         mapView.mapWindow.map.move(with: YMKCameraPosition(target: norilsk, zoom: 11, azimuth: 0, tilt: 0))
         return mapView
     }
 
     func updateUIView(_ uiView: YMKMapView, context: Context) {
-        // Clear previous polylines
-        context.coordinator.mapObjects.removeAll()
+        // ВАЖНО: объекты нужно добавлять в коллекцию ВИДИМОЙ карты.
+        // Раньше Coordinator создавал отдельный YMKMapView() и рисовал в него —
+        // на экране не появлялось ничего.
+        let mapObjects = uiView.mapWindow.map.mapObjects
+        mapObjects.clear()
 
-        // Draw routes
         for route in routes {
-            let polyline = YMKPolyline(points: route.stops.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }, segments: [])
-            let polylineObj = context.coordinator.mapObjects.addPolyline(with: polyline)
-            polylineObj.strokeColor = UIColor(route.colorArgb)
-            polylineObj.strokeWidth = 4
-            polylineObj.isVisible = (selectedRoute == nil || selectedRoute?.id == route.id) ? true : false
-        }
+            let isSelected = selectedRoute?.id == route.id
+            let isVisible = selectedRoute == nil || isSelected
 
-        // Draw selected route polyline (if exists)
-        if let route = selectedRoute {
-            let polyline = YMKPolyline(points: route.polyline.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }, segments: [])
-            let polylineObj = context.coordinator.mapObjects.addPolyline(with: polyline)
-            polylineObj.strokeColor = UIColor(route.colorArgb)
-            polylineObj.strokeWidth = 6
-            polylineObj.isVisible = true
-        }
-    }
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    class Coordinator {
-        let mapObjects: YMKMapObjectCollection
-        init() {
-            self.mapObjects = YMKMapView().mapWindow.map.mapObjects.add()
+            // Геометрия по реальным дорогам (OSM)
+            if route.polyline.count >= 2 {
+                let points = route.polyline.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }
+                let polyline = YMKPolyline(points: points)
+                let polylineObj = mapObjects.addPolyline(with: polyline)
+                // У YMKPolylineMapObject нет свойства strokeColor — только setStrokeColorWith(_:)
+                polylineObj.setStrokeColorWith(UIColor(route.colorArgb))
+                polylineObj.strokeWidth = isSelected ? 6 : 4
+                polylineObj.isVisible = isVisible
+            }
         }
     }
 }

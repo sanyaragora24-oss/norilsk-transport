@@ -1,8 +1,7 @@
 # project.yml — XcodeGen описание проекта.
 # Установить xcodegen: brew install xcodegen
-# Сгенерировать workspace: cd iosApp && xcodegen
-#
-# После генерации открыть NorilskTransit.xcworkspace в Xcode.
+# Сгенерировать проект: cd iosApp && xcodegen generate
+# Затем: pod install && open NorilskTransit.xcworkspace
 
 name: NorilskTransit
 options:
@@ -20,8 +19,8 @@ settings:
     MARKETING_VERSION: "1.2.6"
     CURRENT_PROJECT_VERSION: "8"
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: ""  # Заполнить Apple Developer ID (10-символьный)
-    ENABLE_BITCODE: YES
+    DEVELOPMENT_TEAM: ""  # Заполнить Apple Developer ID (10 символов) перед архивом
+    ENABLE_BITCODE: NO    # bitcode удалён в Xcode 14+, YES ломает линковку SDK Яндекса
 
 targets:
   NorilskTransit:
@@ -29,30 +28,33 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      # Точка входа @main лежит в корне iosApp и ОБЯЗАНА быть в sources,
+      # иначе таргет не содержит entry point и сборка падает.
+      - path: NorilskTransitApp.swift
     resources:
+      # JSON-ассеты и PrivacyInfo.xcprivacy лежат в iosApp/Resources.
+      # Раньше здесь были ссылки на ../app/src/main/assets/*.json —
+      # каталога app/ в репозитории нет, плюс это дублировало ресурсы.
       - path: Resources
-      - path: ../app/src/main/assets/norilsk_routes.json
-      - path: ../app/src/main/assets/norilsk_schedule.json
     info:
-      path: Resources/Info.plist
+      # Info.plist генерируется XcodeGen из properties ниже
+      # (раньше указывался path на несуществующий Resources/Info.plist).
       properties:
         CFBundleDisplayName: Норильский транспорт
         CFBundleShortVersionString: "1.2.6"
         CFBundleVersion: "8"
-        UILaunchStoryboardName: LaunchScreen
-        UIRequiredDeviceCapabilities: [armv7]
+        UIRequiredDeviceCapabilities: [arm64]   # было armv7 — на iOS 17 устройства не ставится
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIUserInterfaceStyle: Dark
         NSLocationWhenInUseUsageDescription: "Нужен для отображения ближайших остановок и работы будильника у выбранной остановки"
         NSLocationAlwaysAndWhenInUseUsageDescription: "Нужен для отслеживания вашего местоположения, чтобы будить вас за 350 м до нужной остановки"
         UIBackgroundModes: [location]
         YANDEX_MAPKIT_API_KEY: "$(YANDEX_MAPKIT_API_KEY)"
-        GoogleServicesFile: GoogleService-Info.plist
         ITSAppUsesNonExemptEncryption: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ru.norilsk.transit
         TARGETED_DEVICE_FAMILY: "1"  # iPhone only
+        # LaunchScreen.storyboard в репозитории нет — используем генерируемый Xcode
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
-        SWIFT_OBJC_BRIDGING_HEADER: ""

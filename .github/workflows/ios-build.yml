@@ -1,29 +1,30 @@
-# GitHub Actions: бесплатная iOS-сборка через macOS runner с Xcode.
+# GitHub Actions: сборка iOS-приложения на macOS runner.
 #
-# Этот workflow:
-# 1. Поднимает macOS runner с Xcode
-# 2. Устанавливает xcodegen
-# 3. Генерирует Xcode-проект из project.yml
-# 4. Устанавливает CocoaPods зависимости (YandexMapsMobile, Firebase, Alamofire)
-# 5. Собирает проект через xcodebuild
-# 6. Архивирует .app и загружает как artifact
+# Что проверяется:
+#  1. Xcode указанной версии реально выбран (xcode-select + проверка версии)
+#  2. Xcode-проект генерируется из project.yml через xcodegen
+#  3. CocoaPods устанавливаются (YandexMapsMobile 4.45.0-full)
+#  4. JSON-ассеты валидны
+#  5. Swift компилируется: xcodebuild под iOS Simulator
+#  6. Собранный .app реально существует и загружается как artifact
 #
-# Запускается автоматически при push в main, pull_request, или вручную через Actions tab.
-# macos-latest = ~5 минут старт, но бесплатно для публичных репозиториев.
+# Любая ошибка xcodebuild роняет workflow (проверяется код возврата,
+# а не код tail/tee).
 
 name: iOS Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'arena/**']
     paths:
       - 'iosApp/**'
       - '.github/workflows/ios-build.yml'
   pull_request:
-    branches: [main]
+    branches: [main, 'arena/**']
     paths:
       - 'iosApp/**'
-  workflow_dispatch:  # Manual trigger from Actions tab
+      - '.github/workflows/ios-build.yml'
+  workflow_dispatch:  # ручной запуск из вкладки Actions
 
 concurrency:
   group: ios-build-${{ github.ref }}
@@ -32,26 +33,57 @@ concurrency:
 jobs:
   build:
     name: Build iOS app (Xcode ${{ matrix.xcode }}, iOS ${{ matrix.ios }})
-    runs-on: macos-14  # Apple Silicon, быстрее
+    runs-on: macos-14
+    timeout-minutes: 60
 
     strategy:
       fail-fast: false
       matrix:
-        xcode: ['16.0']
+        # Версия должна существовать в образе раннера:
+        # см. actions/runner-images → images/macos/macos-14-Readme.md
+        # (Xcode 15.4 по умолчанию, доступны 15.x, 16.1, 16.2).
+        xcode: ['16.2']
         ios: ['17.0']
 
     env:
       LC_ALL: en_US.UTF-8
       LANG: en_US.UTF-8
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+      HOMEBREW_NO_INSTALL_CLEANUP: '1'
+      # Используется при подстановке $(YANDEX_MAPKIT_API_KEY) в Info.plist.
+      # Без секрета подставляется placeholder: сборка валидна, тайлы карты не загрузятся.
+      YANDEX_MAPKIT_API_KEY: ${{ secrets.YANDEX_MAPKIT_API_KEY || 'placeholder-update-before-release' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Xcode ${{ matrix.xcode }}
+        run: |
+          set -euo pipefail
+          XCODE_APP="/Applications/Xcode_${{ matrix.xcode }}.app"
+          if [ ! -d "$XCODE_APP" ]; then
+            echo "::error::Xcode ${{ matrix.xcode }} не найден по пути $XCODE_APP"
+            echo "Доступные Xcode в образе:"
+            ls -d /Applications/Xcode*.app 2>/dev/null || true
+            exit 1
+          fi
+          sudo xcode-select -s "$XCODE_APP/Contents/Developer"
+          echo "=== xcodebuild -version ==="
+          xcodebuild -version
+          # Проверяем, что выбралась именно запрошенная версия
+          ACTUAL="$(xcodebuild -version | head -1 | awk '{print $2}')"
+          echo "Requested: ${{ matrix.xcode }} / Actual: ${ACTUAL}"
+          if [ "${ACTUAL}" != "${{ matrix.xcode }}" ]; then
+            echo "::error::Выбран Xcode ${ACTUAL}, ожидался ${{ matrix.xcode }}"
+            exit 1
+          fi
+
       - name: Show toolchain versions
         run: |
           sw_vers
           xcodebuild -version
+          xcodebuild -showsdks | grep -i ios || true
           ruby -v
           pod --version
 
@@ -68,70 +100,117 @@ jobs:
       - name: Install XcodeGen
         run: |
           brew install xcodegen
+          xcodegen --version
 
       - name: Generate Xcode project
         working-directory: iosApp
         run: |
+          set -euo pipefail
           xcodegen generate
+          if [ ! -d "NorilskTransit.xcodeproj" ]; then
+            echo "::error::NorilskTransit.xcodeproj не создан"
+            exit 1
+          fi
           echo "=== Project files ==="
           ls -la
-
-      - name: Set up API key (placeholder for secrets)
-        working-directory: iosApp
-        env:
-          YANDEX_MAPKIT_API_KEY: ${{ secrets.YANDEX_MAPKIT_API_KEY || 'placeholder-update-before-release' }}
-        run: |
-          echo "YANDEX_MAPKIT_API_KEY=${YANDEX_MAPKIT_API_KEY}" >> $GITHUB_ENV
-          echo "API key configured (length: ${#YANDEX_MAPKIT_API_KEY})"
 
       - name: Install pods
         working-directory: iosApp
         run: |
+          set -euo pipefail
           pod install --repo-update
-          echo "=== Pods installed ==="
-          ls Pods | head -20
+          if [ ! -d "Pods" ] || [ ! -f "NorilskTransit.xcworkspace/contents.xcworkspacedata" ]; then
+            echo "::error::pod install не создал Pods/ или .xcworkspace"
+            exit 1
+          fi
+          echo "=== Установленные поды ==="
+          pod list 2>/dev/null | grep -i -E "Yandex|Firebase|Alamofire" || true
 
       - name: Verify JSON assets
         working-directory: iosApp
         run: |
-          python3 -c "
+          set -euo pipefail
+          python3 - <<'PY'
           import json
-          r = json.load(open('Resources/norilsk_routes.json'))
-          s = json.load(open('Resources/norilsk_schedule.json'))
-          print(f'routes: {len(r[\"routes\"])}')
-          print(f'schedule: {len(s[\"routes\"])}')
-          assert len(r['routes']) > 50, 'routes count too low'
-          assert len(s['routes']) > 50, 'schedule count too low'
-          print('OK')
-          "
 
-      - name: Build for simulator (verification only)
+          routes = json.load(open('Resources/norilsk_routes.json'))['routes']
+          schedule = json.load(open('Resources/norilsk_schedule.json'))['routes']
+
+          print(f'routes: {len(routes)}')
+          print(f'schedule: {len(schedule)}')
+
+          assert len(routes) >= 50, f'routes count too low: {len(routes)}'
+          assert len(schedule) >= 50, f'schedule count too low: {len(schedule)}'
+
+          # Структура маршрута
+          r0 = routes[0]
+          for key in ('id', 'number', 'origin', 'destination', 'colorArgb', 'stops', 'polyline'):
+              assert key in r0, f'route[0] missing key: {key}'
+          assert len(r0['polyline']) >= 2, 'route polyline too short'
+
+          # Маршрут 31 и расписание 31Э должны присутствовать в данных
+          numbers = {r['number'] for r in routes}
+          assert '31' in numbers, 'маршрут 31 отсутствует в norilsk_routes.json'
+          sched_numbers = {v.get('number') for v in schedule.values()}
+          assert '31Э' in sched_numbers, 'расписание 31Э отсутствует в norilsk_schedule.json'
+
+          print('JSON assets OK')
+          PY
+
+      - name: Build for simulator
         working-directory: iosApp
         run: |
-          xcodebuild \
+          set -euo pipefail
+          # -derivedDataPath фиксирует путь до .app (дальше он проверяется и уходит в artifact).
+          # generic/platform=iOS Simulator — без требования конкретной версии рантайма симулятора.
+          if ! xcodebuild \
             -workspace NorilskTransit.xcworkspace \
             -scheme NorilskTransit \
             -configuration Debug \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
-            -quiet \
-            build 2>&1 | tee build.log | tail -100
-          echo "=== Build status: $? ==="
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build 2>&1 | tee build.log | tail -200 ; then
+            echo "::error::xcodebuild завершился с ошибкой (см. build.log в артефактах)"
+            exit 1
+          fi
+          echo "=== xcodebuild: OK ==="
+
+      - name: Show build log on failure
+        if: failure()
+        working-directory: iosApp
+        run: |
+          if [ -f build.log ]; then
+            echo "=== Последние 400 строк build.log ==="
+            tail -400 build.log
+            echo "=== Ошибки ==="
+            grep -n "error:" build.log | head -50 || true
+          fi
 
       - name: Verify .app bundle
         working-directory: iosApp
         run: |
-          APP=$(find ~/Library/Developer/Xcode/DerivedData -name "NorilskTransit.app" -type d 2>/dev/null | head -1)
-          if [ -z "$APP" ]; then
-            echo "ERROR: .app bundle not found"
+          set -euo pipefail
+          APP="build/DerivedData/Build/Products/Debug-iphonesimulator/NorilskTransit.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::.app bundle не найден: $APP"
+            find build/DerivedData -maxdepth 6 -name "*.app" 2>/dev/null || true
             exit 1
           fi
           echo "App bundle: $APP"
-          ls -la "$APP"
-          echo "=== Info.plist ==="
-          /usr/libexec/PlistBuddy -c "Print" "$APP/Info.plist" 2>/dev/null | head -30
-          echo "=== Bundle resources ==="
-          ls "$APP" | grep -E "(json|xcprivacy|car|jpg|png)$"
+          echo "=== Размер ==="
+          du -sh "$APP"
+          echo "=== Info.plist (ключевые поля) ==="
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :UIRequiredDeviceCapabilities" "$APP/Info.plist"
+          echo "=== Ресурсы в bundle ==="
+          ls "$APP" | grep -E "(json|xcprivacy)$" || true
+          echo "=== Зависимости MapKit ==="
+          ls "$APP/Frameworks" 2>/dev/null || true
 
       - name: Upload .app artifact
         uses: actions/upload-artifact@v4
@@ -139,20 +218,21 @@ jobs:
           name: NorilskTransit-app-${{ github.sha }}
           path: |
             iosApp/build.log
-            ~/Library/Developer/Xcode/DerivedData/**/NorilskTransit.app
-          if-no-files-found: warn
+            iosApp/build/DerivedData/Build/Products/Debug-iphonesimulator/NorilskTransit.app
+          if-no-files-found: error   # отсутствие .app = ошибка, а не warning
           retention-days: 14
 
       - name: Build summary
         if: always()
         run: |
-          echo "## iOS build status: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### What was checked:" >> $GITHUB_STEP_SUMMARY
-          echo "- Xcode project generation" >> $GITHUB_STEP_SUMMARY
-          echo "- CocoaPods install (YandexMapsMobile + Firebase + Alamofire)" >> $GITHUB_STEP_SUMMARY
-          echo "- Swift compilation against iOS ${{ matrix.ios }} SDK" >> $GITHUB_STEP_SUMMARY
-          echo "- JSON assets validation" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Artifacts:" >> $GITHUB_STEP_SUMMARY
-          echo "Download the .app from the run page to test on simulator." >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## iOS build status: ${{ job.status }}"
+            echo ""
+            echo "### Что проверено:"
+            echo "- Xcode ${{ matrix.xcode }} выбран и подтверждён"
+            echo "- xcodegen: проект сгенерирован из project.yml"
+            echo "- CocoaPods: YandexMapsMobile 4.45.0-full установлен"
+            echo "- JSON-ассеты: маршруты, расписания, маршрут 31 и 31Э"
+            echo "- xcodebuild: компиляция под iOS ${{ matrix.ios }} Simulator"
+            echo "- .app bundle: проверен и загружен как artifact"
+          } >> "$GITHUB_STEP_SUMMARY"
