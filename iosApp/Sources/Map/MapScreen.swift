@@ -60,7 +60,9 @@ struct YandexMapView: UIViewRepresentable {
     let userLocation: CLLocation?
 
     func makeUIView(context: Context) -> YMKMapView {
-        let mapView = YMKMapView(frame: .zero)
+        // YMKMapView(frame:) приходит из ObjC как failable init -> YMKMapView?
+        // UIViewRepresentable требует non-optional, а на практике init не возвращает nil.
+        let mapView = YMKMapView(frame: .zero)!
         // NOTE: YMKMapView не имеет свойства mapType (было `mapView.mapType = .map` —
         // такой вызов не компилируется). Тип карты задаётся через YMKMap.mapType при необходимости.
         let norilsk = YMKPoint(latitude: 69.34, longitude: 88.21)
