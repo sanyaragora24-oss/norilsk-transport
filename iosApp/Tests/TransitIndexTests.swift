@@ -11,13 +11,8 @@ final class TransitIndexTests: XCTestCase {
     private var index: TransitIndex!
 
     override func setUpWithError() throws {
-        let bundle = Bundle(for: TransitIndexTests.self)
-        let routes = try RoutesParser.parse(
-            try BundleDataLoader.loadData(resourceName: "norilsk_routes", bundle: bundle)
-        )
-        let schedule = try ScheduleParser.parse(
-            try BundleDataLoader.loadData(resourceName: "norilsk_schedule", bundle: bundle)
-        )
+        let routes = try RoutesParser.parse(try TestData.data(resourceName: "norilsk_routes"))
+        let schedule = try ScheduleParser.parse(try TestData.data(resourceName: "norilsk_schedule"))
         index = TransitIndex(routes: routes, schedule: schedule)
     }
 

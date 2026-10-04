@@ -267,7 +267,19 @@ jobs:
             CODE_SIGNING_REQUIRED=NO \
             ONLY_ACTIVE_ARCH=YES \
             test 2>&1 | tee test.log | tail -120 ; then
-            echo "::error::unit-тесты провалились (см. test.log в артефактах)"
+            echo "::error title=unit-tests::unit-тесты провалились (см. test.log в артефактах)"
+            # У шага максимум 10 аннотаций — публикуем только реальные ошибки:
+            # без фильтра слоты занимают ld-предупреждения MapKit.
+            esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
+            grep -E "error:|FAILED|Undefined symbols|No such module|Library not loaded|Testing failed|failed -|crashed|Unable to|caught error" test.log \
+              | grep -v "ld: warning" | cut -c1-300 | head -5 | esc \
+              | while IFS= read -r line; do
+                  [ -n "$line" ] && echo "::error title=test-log::$line"
+                done
+            grep -E "^(Test Suite|Executed|\*\* )" test.log | cut -c1-300 | tail -3 | esc \
+              | while IFS= read -r line; do
+                  [ -n "$line" ] && echo "::error title=test-summary::$line"
+                done
             exit 1
           fi
           echo "=== unit tests: OK ==="
@@ -280,23 +292,17 @@ jobs:
         run: |
           set +e
           esc() { sed -e 's/%/%25/g' -e 's/\r/%0D/g'; }
-          for log in *.log; do
+          # GitHub публикует максимум 10 аннотаций на шаг, поэтому:
+          #   - логи тестов идут раньше логов сборки;
+          #   - ld-предупреждения MapKit отфильтрованы (иначе занимают все слоты).
+          for log in test.log build.log xcodegen.log pod.log; do
             [ -f "$log" ] || continue
-            echo "===== $log ($(wc -c < "$log") bytes) ====="
-            # 1) Строки с реальными ошибками компилятора/линковщика
-            grep -E "(^|[^a-zA-Z-])error:|fatal error:|Undefined symbols|No such module|could not build module|BUILD FAILED|clang: error|ld: |swift-build|error:.*generated" "$log" \
-              | cut -c1-300 | head -25 | esc \
+            grep -E "(^|[^a-zA-Z-])error:|fatal error:|Undefined symbols|No such module|could not build module|BUILD FAILED|TEST FAILED|clang: error|error:.*generated" "$log" \
+              | grep -v "ld: warning" | cut -c1-300 | head -4 | esc \
               | while IFS= read -r line; do
                   [ -n "$line" ] && echo "::error title=$log::$line"
                 done
-            # 2) Хвост лога — там итог BUILD FAILED и список упавших команд
-            echo "----- tail $log -----"
-            tail -25 "$log" | cut -c1-300 | esc \
-              | while IFS= read -r line; do
-                  [ -n "$line" ] && echo "::error title=$log-tail::$line"
-                done
           done
-          exit 0
 
       - name: Verify .app bundle
         working-directory: iosApp
