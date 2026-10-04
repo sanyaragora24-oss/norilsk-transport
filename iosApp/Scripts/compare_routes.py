@@ -20,6 +20,7 @@
   5. точки геометрии и длины
   6. остановки
   7. подозрительные прямые линии
+  8. сверка с norilsk_schedule.json (у кого нет геометрии / нет расписания)
 """
 
 from __future__ import annotations
@@ -43,8 +44,50 @@ def first_key(obj: dict, *names, default=None):
     return default
 
 
+NORILSK_BBOX = (67.0, 71.0, 84.0, 94.0)  # lat_min, lat_max, lon_min, lon_max
+
+
+def decode_polyline(value: str, precision: int):
+    """Раскодировка «свёрнутой» полилинии (Google / MapKit стиль)."""
+    points, index, lat, lon, factor = [], 0, 0, 0, float(10 ** precision)
+    length = len(value)
+    while index < length:
+        for is_lat in (True, False):
+            result, shift = 0, 0
+            while index < length:
+                byte = ord(value[index]) - 63
+                index += 1
+                result |= (byte & 0x1F) << shift
+                shift += 5
+                if byte < 0x20:
+                    break
+            else:
+                return []
+            delta = ~(result >> 1) if (result & 1) else (result >> 1)
+            if is_lat:
+                lat += delta
+            else:
+                lon += delta
+        points.append((lat / factor, lon / factor))
+    return points
+
+
+def in_norilsk(points):
+    lat_min, lat_max, lon_min, lon_max = NORILSK_BBOX
+    return bool(points) and all(lat_min <= lat <= lat_max and lon_min <= lon <= lon_max
+                                for lat, lon in points[:5])
+
+
+def decode_polyline_auto(value: str):
+    """Пробуем точность 1e-6 и 1e-5, выбираем ту, что попадает в район Норильска."""
+    variants = [decode_polyline(value, precision) for precision in (6, 5)]
+    return next((v for v in variants if in_norilsk(v)), variants[0])
+
+
 def load_points(raw):
-    """Точки полилинии: поддерживаем {lat,lon}, {latitude,longitude} и [lat, lon]."""
+    """Точки полилинии: поддерживаем {lat,lon}, {latitude,longitude}, [lat, lon] и строку."""
+    if isinstance(raw, str) and raw.strip():
+        return decode_polyline_auto(raw.strip())
     points = []
     for item in raw or []:
         if isinstance(item, dict):
@@ -106,7 +149,11 @@ def load_routes(path: Path):
             continue
         if not schema_keys:
             schema_keys = sorted(raw.keys())
-        points = load_points(first_key(raw, "polyline", "geometry", "points", default=[]))
+        raw_line = first_key(raw, "polyline", "geometry", "points", default=[])
+        if isinstance(raw_line, dict):  # {"points": [...]} или {"encoded": "..."}
+            raw_line = first_key(raw_line, "points", "polyline", "encoded",
+                                 "coordinates", default=[])
+        points = load_points(raw_line)
         routes.append({
             "id": str(first_key(raw, "id", "routeId", default="")),
             "busId": first_key(raw, "busId", "bus_id"),
@@ -119,6 +166,39 @@ def load_routes(path: Path):
             "stops": load_stops(first_key(raw, "stops", default=[])),
         })
     return routes, top_keys, schema_keys
+
+
+def load_schedules(path: Path):
+    """Расписания: id -> номер, число терминалов и число рейсов."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    raw = first_key(data, "routes", "data", default=data) if isinstance(data, dict) else data
+    if isinstance(raw, list):
+        raw = {str(first_key(r, "id", "routeId", default=i)): r for i, r in enumerate(raw)}
+
+    result = {}
+    for rid, entry in (raw or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        terminals = entry.get("timetable") or []
+        names, departures = [], 0
+        if isinstance(terminals, list) and terminals:
+            for term in terminals:
+                if not isinstance(term, dict):
+                    continue
+                names.append(str(first_key(term, "terminal", "name", default="")))
+                departures += len(term.get("weekday") or []) + len(term.get("weekend") or [])
+        else:  # «плоский» вариант: terminal/weekday/weekend лежат в самой записи
+            names.append(str(first_key(entry, "terminal", default="")))
+            departures += len(entry.get("weekday") or []) + len(entry.get("weekend") or [])
+        result[str(rid)] = {
+            "number": str(first_key(entry, "number", "routeNumber", default="")),
+            "hasSchedule": bool(entry.get("hasSchedule", departures > 0)),
+            "terminals": len([n for n in names if n]),
+            "terminal_names": [n for n in names if n],
+            "departures": departures,
+        }
+    data_date = data.get("dataDate") if isinstance(data, dict) else None
+    return result, data_date
 
 
 # --------------------------------------------------------------------------- геометрия
@@ -223,7 +303,8 @@ def describe(route):
     ]
 
 
-def report(old_routes, new_routes, old_path, new_path, old_keys, new_keys):
+def report(old_routes, new_routes, old_path, new_path, old_keys, new_keys,
+           schedules=None, schedule_path=None, schedule_date=None):
     print("=" * 100)
     print("1. ФАЙЛЫ И КОЛИЧЕСТВО НАПРАВЛЕНИЙ")
     print("=" * 100)
@@ -338,6 +419,47 @@ def report(old_routes, new_routes, old_path, new_path, old_keys, new_keys):
     print("         НУЛЕВЫЕ_КООРДИНАТЫ; ДУБЛИ_ПОДРЯД(>2% точек или >3) — повторы координат подряд")
     print("         НЕТ_ГЕОМЕТРИИ — у направления есть расписание, но нет polyline")
 
+    if schedules is None:
+        return
+
+    print()
+    print("=" * 100)
+    print("8. СВЕРКА С РАСПИСАНИЯМИ (norilsk_schedule.json)")
+    print("=" * 100)
+    print(f"файл расписаний: {schedule_path} (dataDate: {schedule_date})")
+    print(f"записей расписаний: {len(schedules)} | направлений с геометрией: {len(new_routes)}")
+
+    geo_by_id = {r["id"]: r for r in new_routes}
+    no_geometry = sorted(set(schedules) - set(geo_by_id))
+    no_schedule = sorted(set(geo_by_id) - set(schedules))
+
+    print(f"\nесть расписание, НЕТ геометрии ({len(no_geometry)}):")
+    if no_geometry:
+        print_table([[i, schedules[i]["number"], schedules[i]["terminals"],
+                      schedules[i]["departures"],
+                      "; ".join(schedules[i]["terminal_names"])[:58]]
+                     for i in no_geometry],
+                    ["id", "номер", "терм.", "рейсов", "терминалы"])
+    else:
+        print("   нет — у каждого направления с расписанием есть polyline")
+
+    print(f"\nесть геометрия, НЕТ расписания ({len(no_schedule)}): {no_schedule}")
+
+    clash = sorted(i for i in set(schedules) & set(geo_by_id)
+                   if schedules[i]["number"] and geo_by_id[i]["number"]
+                   and schedules[i]["number"] != geo_by_id[i]["number"])
+    print(f"\nномер в расписании и в геометриях различается ({len(clash)}):")
+    for i in clash:
+        print(f"   {i}: расписание={schedules[i]['number']!r} геометрия={geo_by_id[i]['number']!r}")
+
+    empty = sorted(i for i, s in schedules.items() if s["departures"] == 0)
+    empty_declared = [i for i in empty if not schedules[i]["hasSchedule"]]
+    empty_suspicious = [i for i in empty if schedules[i]["hasSchedule"]]
+    print(f"\nрасписаний без единого рейса ({len(empty)}): {empty}")
+    print(f"   из них hasSchedule=false (расписание официально не публикуется): {len(empty_declared)}")
+    print(f"   hasSchedule=true, но рейсов нет (подозрительно): {len(empty_suspicious)} {empty_suspicious}")
+    print(f"всего рейсов в расписаниях: {sum(s['departures'] for s in schedules.values())}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Сравнение norilsk_routes.json")
@@ -345,6 +467,11 @@ def main():
     parser.add_argument("--old", type=Path,
                         default=Path(__file__).resolve().parents[1] / "Resources" / "norilsk_routes.json",
                         help="путь к текущему файлу в репозитории")
+    parser.add_argument("--schedule", type=Path,
+                        default=Path(__file__).resolve().parents[1] / "Resources" / "norilsk_schedule.json",
+                        help="путь к norilsk_schedule.json для раздела 8")
+    parser.add_argument("--no-schedule", action="store_true",
+                        help="не печатать раздел 8 (сверку с расписаниями)")
     args = parser.parse_args()
 
     if not args.new.exists():
@@ -360,9 +487,16 @@ def main():
     else:
         print("старый файл не найден — печатаю только новый")
         old_routes, old_top = [], []
+    schedules = schedule_date = None
+    if not args.no_schedule and args.schedule.exists():
+        schedules, schedule_date = load_schedules(args.schedule)
+    elif not args.no_schedule:
+        print(f"расписания не найдены: {args.schedule} — раздел 8 пропущен")
+
     print()
 
-    report(old_routes, new_routes, args.old, args.new, old_top, new_top)
+    report(old_routes, new_routes, args.old, args.new, old_top, new_top,
+           schedules, args.schedule, schedule_date)
 
 
 if __name__ == "__main__":

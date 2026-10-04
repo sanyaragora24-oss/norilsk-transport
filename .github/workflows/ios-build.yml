@@ -195,6 +195,16 @@ jobs:
           print('JSON assets OK')
           PY
 
+      - name: Routes data report
+        working-directory: iosApp
+        run: |
+          set -euo pipefail
+          # Отчёт по текущему срезу данных (сколько направлений, кому не хватает геометрии,
+          # подозрительные линии). Ничего не меняет — только печатает для истории сборок.
+          echo "::group::compare_routes.py"
+          python3 Scripts/compare_routes.py --new Resources/norilsk_routes.json
+          echo "::endgroup::"
+
       - name: Build for simulator
         working-directory: iosApp
         run: |
