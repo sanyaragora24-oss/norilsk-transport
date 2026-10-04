@@ -42,9 +42,19 @@ public enum TransitDataError: LocalizedError {
 /// Загрузка данных из бандла. Используется приложением; в тестах не вызывается.
 public enum BundleDataLoader {
     public static func loadData(resourceName: String, bundle: Bundle) throws -> Data {
-        guard let url = bundle.url(forResource: resourceName, withExtension: "json") else {
-            throw TransitDataError.fileNotFound(name: "\(resourceName).json")
+        // Обычно ресурсы лежат в корне бандла.
+        if let url = bundle.url(forResource: resourceName, withExtension: "json") {
+            return try Data(contentsOf: url)
         }
-        return try Data(contentsOf: url)
+        // XcodeGen может скопировать Resources как folder reference — тогда
+        // файлы оказываются в подкаталоге Resources/.
+        if let url = bundle.url(forResource: "Resources/\(resourceName)", withExtension: "json") {
+            return try Data(contentsOf: url)
+        }
+        let candidates = bundle.urls(forResourcesWithExtension: "json", subdirectory: nil) ?? []
+        if let match = candidates.first(where: { $0.lastPathComponent == "\(resourceName).json" }) {
+            return try Data(contentsOf: match)
+        }
+        throw TransitDataError.fileNotFound(name: "\(resourceName).json")
     }
 }

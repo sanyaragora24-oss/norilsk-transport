@@ -343,13 +343,23 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :UIRequiredDeviceCapabilities" "$APP/Info.plist"
           echo "=== Ресурсы в bundle ==="
           ls "$APP" | grep -E "(json|xcprivacy)$" || true
-          # Данные приложения обязаны лежать внутри .app: без них экраны пустые
+          # Данные приложения обязаны лежать внутри .app: без них экраны пустые.
+          # Ищем рекурсивно: XcodeGen может скопировать Resources как folder reference.
+          echo "=== Поиск JSON внутри .app ==="
+          find "$APP" -name "*.json" | head -10
+          echo "::notice title=app-json::$(find "$APP" -name '*.json' | head -6 | tr '\n' ' ')"
+          FOUND=0
           for dataFile in norilsk_routes.json norilsk_schedule.json; do
-            if [ ! -f "$APP/$dataFile" ]; then
-              echo "::error::В .app нет файла данных $dataFile"
-              exit 1
+            if [ -f "$APP/$dataFile" ] || [ -n "$(find "$APP" -name "$dataFile" -print -quit)" ]; then
+              FOUND=$((FOUND + 1))
+            else
+              echo "::warning title=app-data::в .app не найден $dataFile"
             fi
           done
+          if [ "$FOUND" -ne 2 ]; then
+            echo "::error::В .app не найдены файлы данных (найдено $FOUND из 2)"
+            exit 1
+          fi
           echo "=== Зависимости MapKit ==="
           ls "$APP/Frameworks" 2>/dev/null || true
           echo "::notice title=app-size::$(du -sh "$APP" | cut -f1)"
