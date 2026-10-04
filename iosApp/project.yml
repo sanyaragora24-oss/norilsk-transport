@@ -55,7 +55,9 @@ targets:
       # JSON-ассеты и PrivacyInfo.xcprivacy лежат в iosApp/Resources.
       # Раньше здесь были ссылки на ../app/src/main/assets/*.json —
       # каталога app/ в репозитории нет, плюс это дублировало ресурсы.
+      # buildPhase задан явно: без него JSON не попадали в .app.
       - path: Resources
+        buildPhase: resources
     info:
       # ВАЖНО: для Plist в XcodeGen ключ `path` ОБЯЗАТЕЛЕН
       # (Sources/ProjectSpec/Plist.swift: path = try jsonDictionary.json(atKeyPath: "path")).
