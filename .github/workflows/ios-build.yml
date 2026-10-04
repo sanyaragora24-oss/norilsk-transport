@@ -343,8 +343,18 @@ jobs:
           /usr/libexec/PlistBuddy -c "Print :UIRequiredDeviceCapabilities" "$APP/Info.plist"
           echo "=== Ресурсы в bundle ==="
           ls "$APP" | grep -E "(json|xcprivacy)$" || true
+          # Данные приложения обязаны лежать внутри .app: без них экраны пустые
+          for dataFile in norilsk_routes.json norilsk_schedule.json; do
+            if [ ! -f "$APP/$dataFile" ]; then
+              echo "::error::В .app нет файла данных $dataFile"
+              exit 1
+            fi
+          done
           echo "=== Зависимости MapKit ==="
           ls "$APP/Frameworks" 2>/dev/null || true
+          echo "::notice title=app-size::$(du -sh "$APP" | cut -f1)"
+          echo "::notice title=app-frameworks::$(ls "$APP/Frameworks" 2>/dev/null | tr '\n' ' ')"
+          echo "::notice title=app-resources::$(ls "$APP" | grep -E '(json|xcprivacy)' | tr '\n' ' ')"
 
       - name: Upload .app artifact
         uses: actions/upload-artifact@v6
