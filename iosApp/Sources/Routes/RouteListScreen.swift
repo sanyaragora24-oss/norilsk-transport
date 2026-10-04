@@ -14,20 +14,22 @@ struct RouteListScreen: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var query = ""
-    @State private var tab: ListTab = .routes
+    @State private var tab: ListTab
 
     /// Показ маршрута на карте (закрывает список и выделяет линию).
     private let onShowRoute: ((RouteVariant) -> Void)?
     /// Показ остановки на карте (закрывает список и центрует камеру).
     private let onShowStop: ((StopInfo) -> Void)?
 
-    init(onShowRoute: ((RouteVariant) -> Void)? = nil,
+    init(initialTab: ListTab = .routes,
+         onShowRoute: ((RouteVariant) -> Void)? = nil,
          onShowStop: ((StopInfo) -> Void)? = nil) {
+        _tab = State(initialValue: initialTab)
         self.onShowRoute = onShowRoute
         self.onShowStop = onShowStop
     }
 
-    private enum ListTab: String, CaseIterable, Identifiable {
+    enum ListTab: String, CaseIterable, Identifiable {
         case routes = "Маршруты"
         case stops = "Остановки"
 

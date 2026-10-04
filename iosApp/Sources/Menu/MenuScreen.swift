@@ -1,11 +1,13 @@
-// MenuScreen.swift — экран меню.
-// Этап 1: минимальная реализация (экран требовался MapScreen, но не существовал —
-// из-за этого проект не компилировался). Наполнение — на следующих этапах.
+// MenuScreen.swift — меню приложения: цифры по фактически загруженным данным.
 
 import SwiftUI
+import NorilskTransitCore
 
 struct MenuScreen: View {
+    @EnvironmentObject private var store: TransitStore
     @Environment(\.dismiss) private var dismiss
+
+    private var variants: [RouteVariant] { store.index?.variants ?? [] }
 
     private var appVersion: String {
         let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -17,8 +19,23 @@ struct MenuScreen: View {
         NavigationStack {
             List {
                 Section("Данные") {
-                    LabeledContent("Маршруты и расписания", value: "встроены")
+                    LabeledContent("Направлений", value: "\(variants.count)")
+                    LabeledContent("С треком на карте", value: "\(variants.filter { $0.hasGeometry }.count)")
+                    LabeledContent("Без трека", value: "\(variants.filter { !$0.hasGeometry }.count)")
+                    LabeledContent("С расписанием", value: "\(variants.filter { $0.hasSchedule }.count)")
+                    LabeledContent("Остановок", value: "\(store.index?.stops.count ?? 0)")
+                    LabeledContent("Обновлено", value: store.index?.dataDate ?? "—")
                     LabeledContent("Работа офлайн", value: "да")
+                }
+
+                Section {
+                    Text("Расписания — официальные данные МУП «Норильсктранс», встроены в приложение." +
+                         " Геометрия и остановки есть не для всех направлений: где её нет, мы ничего не выдумываем." +
+                         " Время показывается норильское (UTC+7).")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Источник")
                 }
 
                 Section("О приложении") {

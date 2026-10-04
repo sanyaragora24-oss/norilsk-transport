@@ -14,6 +14,7 @@ struct MapScreen: View {
     @State private var detailVariant: RouteVariant?
     @State private var selectedStop: StopInfo?
     @State private var showRouteList = false
+    @State private var showStopsList = false
     @State private var showFavorites = false
     @State private var showMenu = false
     @State private var centerOnUser = false
@@ -69,6 +70,17 @@ struct MapScreen: View {
         }
         .sheet(isPresented: $showRouteList) {
             RouteListScreen(
+                onShowRoute: { variant in
+                    selectedVariant = variant
+                },
+                onShowStop: { stop in
+                    centerOnStop = MapStopOverlay(id: stop.id, lat: stop.lat, lon: stop.lon, title: stop.name)
+                }
+            )
+        }
+        .sheet(isPresented: $showStopsList) {
+            RouteListScreen(
+                initialTab: .stops,
                 onShowRoute: { variant in
                     selectedVariant = variant
                 },
@@ -151,6 +163,16 @@ struct MapScreen: View {
                     .padding(.vertical, 12)
                     .background(.blue, in: Capsule())
                     .foregroundStyle(.white)
+            }
+
+            Button {
+                showStopsList = true
+            } label: {
+                Label("Остановки", systemImage: "mappin.circle")
+                    .font(.subheadline)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+                    .background(.ultraThinMaterial, in: Capsule())
             }
 
             Spacer()
