@@ -169,7 +169,22 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
+          import hashlib
           import json
+
+          # Данные должны быть побайтово теми же, что в Android v1.2.9 (versionCode 11).
+          # В файле расписаний CRLF, поэтому Resources/.gitattributes держит -text:
+          # если байты кто-то пересохранит, хэш не сойдётся и сборка упадёт здесь.
+          expected_hashes = {
+              'Resources/norilsk_routes.json':
+                  'f3729c303faafc1cbe786195003aeb6efeeee26b0114036f174b7f45fc716fab',
+              'Resources/norilsk_schedule.json':
+                  '23739bba076855b83c5003722b7af1e7b64da13ac6d22baa5f06d335d26a98d4',
+          }
+          for path, expected in expected_hashes.items():
+              actual = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+              print(f'{path}: {actual}')
+              assert actual == expected, f'{path}: хэш {actual} != {expected}'
 
           routes = json.load(open('Resources/norilsk_routes.json'))['routes']
           schedule = json.load(open('Resources/norilsk_schedule.json'))['routes']
