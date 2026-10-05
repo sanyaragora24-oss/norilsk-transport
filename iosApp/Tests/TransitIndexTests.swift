@@ -19,18 +19,22 @@ final class TransitIndexTests: XCTestCase {
     // MARK: - Общая структура
 
     func testVariantCounts() {
-        // 54 направления с геометрией + 8 записей только с расписанием
+        // Android v1.2.9: все 62 направления имеют геометрию.
+        // До этой версии 8 записей (2246:0/1 и 3467:0...5) шли только с расписанием.
         XCTAssertEqual(index.variants.count, 62)
-        XCTAssertEqual(index.variants.filter { $0.hasGeometry }.count, 54)
-        XCTAssertEqual(index.variants.filter { !$0.hasGeometry }.count, 8)
+        XCTAssertEqual(index.variants.filter { $0.hasGeometry }.count, 62)
+        XCTAssertEqual(index.variants.filter { !$0.hasGeometry }.count, 0)
     }
 
-    func testScheduleOnlyIdsAreExactly31Family() {
+    func testNoVariantsWithoutGeometryRemain() {
         let scheduleOnly = index.variants.filter { !$0.hasGeometry }.map { $0.id }.sorted()
-        XCTAssertEqual(
-            scheduleOnly,
-            ["2246:0", "2246:1", "3467:0", "3467:1", "3467:2", "3467:3", "3467:4", "3467:5"]
-        )
+        XCTAssertEqual(scheduleOnly, [])
+
+        // Исторически «только расписание» было у этих восьми id — теперь у них есть трек,
+        // поэтому проверяем, что они присутствуют и не потерялись при синхронизации.
+        for id in ["2246:0", "2246:1", "3467:0", "3467:1", "3467:2", "3467:3", "3467:4", "3467:5"] {
+            XCTAssertTrue(index.variant(id: id)?.hasGeometry ?? false, "нет геометрии у \(id)")
+        }
     }
 
     func testEveryGeometryVariantHasLineAndStops() {
@@ -52,22 +56,29 @@ final class TransitIndexTests: XCTestCase {
 
     // MARK: - 31 / 31Э
 
-    func test31EHasSixDirectionsWithoutGeometry() {
+    func test31EHasSixDirectionsWithGeometry() {
         let variants = index.variants(number: "31Э")
         XCTAssertEqual(variants.count, 6)
 
-        // 31Э: геометрия МУП не опубликована — линии нет, но расписание есть
-        XCTAssertTrue(variants.allSatisfy { !$0.hasGeometry })
-        XCTAssertTrue(variants.allSatisfy { $0.stops.isEmpty })
-        XCTAssertTrue(variants.allSatisfy { $0.polyline.isEmpty })
+        // С Android v1.2.9 у 31Э опубликованы все шесть треков (455/400/575/521/580/477 точек)
+        XCTAssertTrue(variants.allSatisfy { $0.hasGeometry })
+        XCTAssertTrue(variants.allSatisfy { !$0.stops.isEmpty })
+        XCTAssertTrue(variants.allSatisfy { $0.polyline.count >= 2 })
         XCTAssertTrue(variants.allSatisfy { $0.hasSchedule })
 
-        let terminals = Set(variants.map { $0.schedule?.terminals ?? [] })
-        XCTAssertEqual(terminals.count, 1)
-        XCTAssertEqual(
-            terminals.first?.sorted(),
-            ["Кайеркан (ТБК)", "Норильск (АДЦ)", "Пождепо", "Хлебозавод"]
-        )
+        let points = variants.map(\.polyline.count).sorted()
+        XCTAssertEqual(points, [400, 455, 477, 521, 575, 580])
+
+        // В production-наборе v1.2.9 терминалы публикуются неравномерно:
+        // у 3467:0/1 — все четыре, у 3467:2...5 — только Хлебозавод и Кайеркан (ТБК).
+        let allFour = Set(["Кайеркан (ТБК)", "Норильск (АДЦ)", "Пождепо", "Хлебозавод"])
+        let twoOnly = Set(["Кайеркан (ТБК)", "Хлебозавод"])
+        for id in ["3467:0", "3467:1"] {
+            XCTAssertEqual(Set(index.variant(id: id)?.schedule?.terminals ?? []), allFour, "терминалы \(id)")
+        }
+        for id in ["3467:2", "3467:3", "3467:4", "3467:5"] {
+            XCTAssertEqual(Set(index.variant(id: id)?.schedule?.terminals ?? []), twoOnly, "терминалы \(id)")
+        }
     }
 
     func test31EIsNotMergedWith31() {
@@ -76,16 +87,30 @@ final class TransitIndexTests: XCTestCase {
         let thirtyOneE = Set(index.variants(number: "31Э").map { $0.id })
         XCTAssertFalse(thirtyOne.isEmpty)
         XCTAssertTrue(thirtyOne.isDisjoint(with: thirtyOneE))
-        XCTAssertEqual(index.variants(number: "31").count, 6)  // 4 с геометрией + 2 старых
+        XCTAssertEqual(index.variants(number: "31").count, 6)  // все шесть с геометрией
     }
 
-    func testLegacy31DirectionsAreScheduleOnly() {
-        XCTAssertFalse(index.variant(id: "2246:0")?.hasGeometry ?? true)
-        XCTAssertFalse(index.variant(id: "2246:1")?.hasGeometry ?? true)
-        XCTAssertTrue(index.variant(id: "2246:2")?.hasGeometry ?? false)
-        XCTAssertTrue(index.variant(id: "2246:3")?.hasGeometry ?? false)
-        XCTAssertTrue(index.variant(id: "2246:4")?.hasGeometry ?? false)
-        XCTAssertTrue(index.variant(id: "2246:5")?.hasGeometry ?? false)
+    func testAllSix31DirectionsHaveGeometry() {
+        // 2246:0/1 раньше были «старыми» записями только с расписанием,
+        // в Android v1.2.9 для них тоже опубликованы треки (455 и 400 точек).
+        for id in ["2246:0", "2246:1", "2246:2", "2246:3", "2246:4", "2246:5"] {
+            XCTAssertTrue(index.variant(id: id)?.hasGeometry ?? false, "нет геометрии у \(id)")
+        }
+        XCTAssertEqual(index.variant(id: "2246:0")?.polyline.count, 455)
+        XCTAssertEqual(index.variant(id: "2246:1")?.polyline.count, 400)
+    }
+
+    func test31EGeometryMatches31Geometry() {
+        // Треки 31Э и 31 общие: попарно совпадают и линия, и список остановок.
+        for (regular, express) in [("2246:0", "3467:0"), ("2246:1", "3467:1"), ("2246:2", "3467:2"),
+                                   ("2246:3", "3467:3"), ("2246:4", "3467:4"), ("2246:5", "3467:5")] {
+            XCTAssertEqual(index.variant(id: regular)?.polyline.count,
+                           index.variant(id: express)?.polyline.count,
+                           "разное число точек у \(regular) и \(express)")
+            XCTAssertEqual(index.variant(id: regular)?.stops.map(\.id),
+                           index.variant(id: express)?.stops.map(\.id),
+                           "разные остановки у \(regular) и \(express)")
+        }
     }
 
     func testVariantsWithoutScheduleHaveNoTimetable() {
@@ -132,13 +157,14 @@ final class TransitIndexTests: XCTestCase {
         XCTAssertEqual(Geo.polylineLengthMeters([]), 0)
     }
 
-    func testVariantLengthIsZeroWithoutGeometry() {
-        let noGeometry = index.variants.filter { !$0.hasGeometry }
-        XCTAssertFalse(noGeometry.isEmpty)
-        XCTAssertTrue(noGeometry.allSatisfy { $0.lengthMeters == 0 })
+    func testEveryVariantHasPositiveLength() {
+        // После синхронизации с Android v1.2.9 направлений без геометрии нет,
+        // поэтому длина посчитана у всех 62.
+        XCTAssertTrue(index.variants.allSatisfy { $0.hasGeometry })
+        XCTAssertTrue(index.variants.allSatisfy { $0.lengthMeters > 0 })
 
-        let withGeometry = index.variants.filter { $0.hasGeometry }
-        XCTAssertTrue(withGeometry.allSatisfy { $0.lengthMeters > 0 })
+        // Ноль — только когда трека действительно нет (проверка самого Geo на соседнем тесте).
+        XCTAssertEqual(Geo.polylineLengthMeters([]), 0)
     }
 
     func testNearestStopsRespectsLimit() {

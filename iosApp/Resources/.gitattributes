@@ -1,0 +1,3 @@
+# Production Android v1.2.9 data: keep bytes exactly as shipped (CRLF matters for SHA-256).
+norilsk_routes.json -text
+norilsk_schedule.json -text
