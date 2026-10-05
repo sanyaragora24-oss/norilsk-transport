@@ -20,6 +20,8 @@ iosApp/build.log
 iosApp/Pods/
 
 # --- Secrets / локальные ключи ---
+# Локальный файл с ключами создаётся из Secrets.xcconfig.template и НЕ коммитится.
+iosApp/Secrets.xcconfig
 GoogleService-Info.plist
 *.jks
 *.keystore

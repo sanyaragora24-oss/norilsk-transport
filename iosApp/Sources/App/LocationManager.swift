@@ -3,6 +3,7 @@
 
 import Foundation
 import CoreLocation
+import UIKit
 import Combine
 
 struct Weather {
@@ -13,9 +14,20 @@ struct Weather {
 class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     @Published var lastLocation: CLLocation?
     @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
+    /// Текст последней ошибки геолокации (только для диагностики в UI, без координат).
+    @Published var lastError: String?
     @Published var weather: Weather?
 
     private let manager = CLLocationManager()
+
+    /// Разрешение получено (When In Use или Always).
+    var isAuthorized: Bool {
+        switch authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways: return true
+        case .notDetermined, .denied, .restricted: return false
+        @unknown default: return false
+        }
+    }
 
     override init() {
         super.init()
@@ -23,9 +35,32 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         manager.desiredAccuracy = kCLLocationAccuracyBest
         manager.allowsBackgroundLocationUpdates = false
         manager.pausesLocationUpdatesAutomatically = true
-        // Запросить разрешения — пользователь увидит диалог при первом запуске карты
+
+        // Текущий статус приходит и через делегат, но не гарантированно сразу:
+        // читаем его сами, иначе при повторном запуске (уже с разрешением)
+        // обновления могли бы не стартовать.
+        authorizationStatus = manager.authorizationStatus
+        if isAuthorized {
+            manager.startUpdatingLocation()
+        } else {
+            // Пользователь увидит системный диалог при первом запуске карты.
+            // Если доступ уже запрещён, система диалог не покажет — об этом
+            // знает UI и предлагает открыть «Настройки».
+            manager.requestWhenInUseAuthorization()
+        }
+    }
+
+    /// Запросить «When In Use». Имеет смысл только для .notDetermined:
+    /// после отказа iOS диалог больше не показывает.
+    func requestPermission() {
+        guard authorizationStatus == .notDetermined else { return }
         manager.requestWhenInUseAuthorization()
-        manager.startUpdatingLocation()
+    }
+
+    /// Открыть настройки приложения — единственный путь вернуть доступ после отказа.
+    func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url, options: [:], completionHandler: nil)
     }
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
@@ -37,11 +72,20 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         authorizationStatus = status
         if status == .authorizedWhenInUse || status == .authorizedAlways {
             manager.startUpdatingLocation()
+        } else {
+            // Без разрешения обновления не нужны: экономим батарею и не
+            // получаем бесконечных ошибок в консоль.
+            manager.stopUpdatingLocation()
+            lastLocation = nil
         }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        // ignored
+        // Сюда приходят в том числе kCLErrorDenied (нет разрешения) и
+        // kCLErrorLocationUnknown (GPS ещё не определился) — оба штатные.
+        // Падать нельзя: карта работает и без геолокации, просто не показывает
+        // точку пользователя.
+        lastError = error.localizedDescription
     }
 }
 

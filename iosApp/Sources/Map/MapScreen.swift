@@ -19,6 +19,7 @@ struct MapScreen: View {
     @State private var showMenu = false
     @State private var centerOnUser = false
     @State private var centerOnStop: MapStopOverlay?
+    @State private var showLocationSettingsAlert = false
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -52,6 +53,18 @@ struct MapScreen: View {
                         .padding(.vertical, 6)
                         .background(.red.opacity(0.85), in: Capsule())
                         .foregroundStyle(.white)
+                }
+
+                // Ключ карты не задан — состояние конфигурации, а не ошибка данных.
+                // Пишем прямо: подложка не загрузится, всё остальное работает.
+                if MapKitKey.currentState == .missing {
+                    Text("Ключ Яндекс.Карт не задан — подложка карты не загрузится")
+                        .font(.footnote)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(.orange.opacity(0.9), in: Capsule())
+                        .foregroundStyle(.black)
+                        .accessibilityLabel("Ключ Яндекс.Карт не задан")
                 }
 
                 Spacer()
@@ -125,6 +138,14 @@ struct MapScreen: View {
             )
         }
         .sheet(isPresented: $showMenu) { MenuScreen() }
+        .alert("Доступ к геолокации запрещён", isPresented: $showLocationSettingsAlert) {
+            Button("Настройки") { locationManager.openAppSettings() }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text("Разрешите доступ к местоположению в Настройках, чтобы приложение показывало "
+                 + "вас на карте и ближайшие остановки. Без разрешения карта и расписания работают, "
+                 + "но без вашей точки.")
+        }
     }
 
     // MARK: - Данные для карты
@@ -182,7 +203,20 @@ struct MapScreen: View {
             Spacer()
 
             Button {
-                centerOnUser = true
+                // Разрешение ещё не спрашивали — запрашиваем и ждём позицию.
+                // Уже запрещено — система диалог не покажет, поэтому ведём в Настройки:
+                // молча ничего не делать пользователь не поймёт.
+                switch locationManager.authorizationStatus {
+                case .authorizedWhenInUse, .authorizedAlways:
+                    centerOnUser = true
+                case .notDetermined:
+                    locationManager.requestPermission()
+                    centerOnUser = true
+                case .denied, .restricted:
+                    showLocationSettingsAlert = true
+                @unknown default:
+                    centerOnUser = true
+                }
             } label: {
                 Image(systemName: "location.fill")
                     .font(.title3)
@@ -264,7 +298,11 @@ struct TransitMapView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> YMKMapView {
         // YMKMapView(frame:) приходит из ObjC как failable init -> YMKMapView?
-        let mapView = YMKMapView(frame: .zero)!
+        // На практике nil не возвращается, но молча разворачивать нельзя:
+        // оставляем осознанную причину, а не «неожиданный nil».
+        guard let mapView = YMKMapView(frame: .zero) else {
+            preconditionFailure("YMKMapView не создан: MapKit не инициализирован или не хватило памяти")
+        }
         mapView.mapWindow.map.move(
             with: YMKCameraPosition(target: Self.norilskCenter, zoom: 11, azimuth: 0, tilt: 0)
         )
@@ -334,12 +372,16 @@ struct TransitMapView: UIViewRepresentable {
             }
         }
 
-        // Центровка на пользователя по кнопке
+        // Центровка на пользователя по кнопке.
+        // cameraPosition() возвращает nil, пока MapKit не получил первую позицию
+        // (или доступ запрещён) — флаг в этом случае НЕ сбрасываем, иначе нажатие
+        // «потеряется» и карта никуда не переедет. Повтор происходит на следующем
+        // обновлении SwiftUI; когда позиция придёт — сбрасываем.
         if centerOnUser {
             if let position = context.coordinator.userLayer?.cameraPosition() {
                 map.move(with: position, animation: YMKAnimation(type: .smooth, duration: 0.4))
+                DispatchQueue.main.async { centerOnUser = false }
             }
-            DispatchQueue.main.async { centerOnUser = false }
         }
 
         // Центровка на остановке (переход «на карту» из списков)
@@ -353,6 +395,18 @@ struct TransitMapView: UIViewRepresentable {
             map.move(with: position, animation: YMKAnimation(type: .smooth, duration: 0.4))
             DispatchQueue.main.async { centerOnStop = nil }
         }
+    }
+
+    /// Lifecycle. В MapKit 4.x у YMKMapView нет методов onStart/onStop (они были
+    /// в 3.x) — рендер останавливается сам при уходе view с экрана. Но слушатели
+    /// тапов и слой геолокации держим МЫ, поэтому освобождаем их явно:
+    /// иначе координатор со слоем висел бы до следующего пересоздания карты.
+    static func dismantleUIView(_ mapView: YMKMapView, coordinator: Coordinator) {
+        mapView.mapWindow.map.mapObjects.clear()
+        coordinator.userLayer?.setVisibleWithOn(false)
+        coordinator.userLayer = nil
+        coordinator.lastDrawSignature = nil
+        coordinator.lastFitRouteId = nil
     }
 
     final class Coordinator: NSObject, YMKMapObjectTapListener {

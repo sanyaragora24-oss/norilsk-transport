@@ -10,13 +10,8 @@ struct MenuScreen: View {
     private var variants: [RouteVariant] { store.index?.variants ?? [] }
 
     /// Без ключа сборка валидна, но тайлы не загрузятся — говорим об этом прямо.
-    private var mapKeyState: String {
-        let raw = Bundle.main.object(forInfoDictionaryKey: "YANDEX_MAPKIT_API_KEY") as? String ?? ""
-        if raw.isEmpty || raw.hasPrefix("$(") {
-            return "не задан"
-        }
-        return "задан"
-    }
+    /// Значение ключа не показываем никогда: только состояние (см. MapKitKey).
+    private var mapKeyState: String { MapKitKey.currentState.title }
 
     private var appVersion: String {
         let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -51,6 +46,16 @@ struct MenuScreen: View {
                     LabeledContent("Версия", value: appVersion)
                     LabeledContent("Карта", value: "Яндекс MapKit")
                     LabeledContent("Ключ карты", value: mapKeyState)
+                }
+
+                if MapKitKey.currentState == .missing {
+                    Section("Ключ карты") {
+                        Text("Ключ Яндекс.Карт не задан: подложка карты (тайлы) не загрузится, " +
+                             "но линии маршрутов, остановки и расписания работают — они из встроенных JSON. " +
+                             "Как задать ключ локально: iosApp/README.md, раздел «Ключ карты».")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section {

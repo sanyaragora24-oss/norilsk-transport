@@ -57,6 +57,11 @@ targets:
       # Раньше здесь были ссылки на ../app/src/main/assets/*.json —
       # каталога app/ в репозитории нет, плюс это дублировало ресурсы.
       - path: Resources
+    # Ключ карты НЕ подключается через configFiles: base configuration целиком
+    # ведёт CocoaPods, и подмена ломает интеграцию подов. Ключ прокидывается в
+    # build settings приложения из Podfile (post_install), откуда подставляется
+    # в Info.plist как $(YANDEX_MAPKIT_API_KEY). Источник значения —
+    # gitignored Secrets.xcconfig или переменная окружения, см. README.
     dependencies:
       - target: NorilskTransitCore
         link: true

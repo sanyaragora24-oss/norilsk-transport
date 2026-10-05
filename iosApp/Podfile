@@ -40,6 +40,26 @@ target 'NorilskTransit' do
   # pod 'SwiftyJSON', '~> 5.0'
 end
 
+# Значение ключа карты: сначала переменная окружения (релизная сборка, секрет
+# YANDEX_MAPKIT_API_KEY), иначе — gitignored Secrets.xcconfig (локальная разработка).
+# Пусто, если ключ не задан: приложение показывает состояние «не задан»,
+# но собирается и работает. Сам ключ НИКОГДА не печатается в лог pod install.
+def mapkit_api_key
+  candidates = []
+
+  env_value = ENV['YANDEX_MAPKIT_API_KEY'].to_s.strip
+  candidates << env_value unless env_value.empty? || env_value.start_with?('$(')
+
+  secrets_path = File.join(__dir__, 'Secrets.xcconfig')
+  if File.exist?(secrets_path)
+    line = File.readlines(secrets_path).find { |l| l =~ /^\s*YANDEX_MAPKIT_API_KEY\s*=/ }
+    file_value = line.to_s.split('=', 2).last.to_s.strip
+    candidates << file_value unless file_value.empty? || file_value.start_with?('$(')
+  end
+
+  candidates.first.to_s
+end
+
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     target.build_configurations.each do |config|
@@ -50,4 +70,23 @@ post_install do |installer|
       config.build_settings['SWIFT_VERSION'] = '5.0'
     end
   end
+
+  # Ключ карты — в build settings приложения, откуда он подставляется в
+  # Info.plist ($(YANDEX_MAPKIT_API_KEY)). Base configuration трогать нельзя:
+  # её целиком ведёт CocoaPods, подмена ломает интеграцию подов.
+  # Значение оседает только в локальном .xcodeproj (он в .gitignore) и в
+  # Info.plist собранного .app.
+  api_key = mapkit_api_key
+  configured = !api_key.empty?
+  installer.aggregate_targets.each do |aggregate_target|
+    project = aggregate_target.user_project
+    project.targets.each do |target|
+      next unless target.name == 'NorilskTransit'
+      target.build_configurations.each do |config|
+        config.build_settings['YANDEX_MAPKIT_API_KEY'] = api_key
+      end
+    end
+    project.save
+  end
+  puts "MapKit API key: #{configured ? 'задан (значение не печатается)' : 'не задан'}"
 end

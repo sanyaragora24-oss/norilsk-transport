@@ -50,9 +50,12 @@ jobs:
       LANG: en_US.UTF-8
       HOMEBREW_NO_AUTO_UPDATE: '1'
       HOMEBREW_NO_INSTALL_CLEANUP: '1'
-      # Используется при подстановке $(YANDEX_MAPKIT_API_KEY) в Info.plist.
-      # Без секрета подставляется placeholder: сборка валидна, тайлы карты не загрузятся.
-      YANDEX_MAPKIT_API_KEY: ${{ secrets.YANDEX_MAPKIT_API_KEY || 'placeholder-update-before-release' }}
+      # Ключ карты в CI НЕ подставляется (см. шаг «Generate Xcode project»):
+      # артефакт .app публичный, а ключ живёт в Info.plist. Для локальной сборки
+      # с настоящими тайлами: cp iosApp/Secrets.xcconfig.template iosApp/Secrets.xcconfig
+      # и вписать ключ. Для релизной сборки используется секрет YANDEX_MAPKIT_API_KEY.
+      # Здесь задаём только то, что отличает CI-конфигурацию:
+      CI_BUILD_WITHOUT_MAPKIT_KEY: '1'
 
     steps:
       - name: Checkout
@@ -130,6 +133,22 @@ jobs:
         working-directory: iosApp
         run: |
           set -euo pipefail
+          # Локальные секреты: файла в репозитории нет (он в .gitignore),
+          # поэтому CI создаёт его из шаблона — с ПУСТЫМ ключом.
+          # Значение отсюда читает Podfile (post_install) и кладёт в build
+          # settings; пустое значение = «ключ не задан».
+          #
+          # Секрет YANDEX_MAPKIT_API_KEY сознательно НЕ подставляется в этот
+          # билд: артефакт .app публикуется и содержит Info.plist, то есть ключ
+          # уехал бы в открытый доступ. Ключ нужен для релизной (архивной)
+          # сборки, где артефакт не публикуется; здесь сборка обязана работать
+          # без него, а его отсутствие видно как configuration state.
+          if [ ! -f Secrets.xcconfig ]; then
+            cp Secrets.xcconfig.template Secrets.xcconfig
+            echo "Secrets.xcconfig создан из шаблона (ключ не задан)"
+          else
+            echo "Secrets.xcconfig уже существует — не трогаем"
+          fi
           xcodegen generate 2>&1 | tee xcodegen.log
           if [ ! -d "NorilskTransit.xcodeproj" ]; then
             echo "::error::NorilskTransit.xcodeproj не создан"
@@ -370,6 +389,18 @@ jobs:
           # именно ту версию, что задана в project.yml (в логе это искать неудобно).
           echo "версия: $APP_VERSION ($APP_BUILD)"
           echo "::notice title=app-version::$APP_VERSION ($APP_BUILD)"
+
+          # Состояние ключа карты. Печатаем ТОЛЬКО состояние: сам ключ лежит в этом
+          # же Info.plist и ни при каких условиях не должен попасть в лог.
+          MAPKIT_KEY_VALUE="$(/usr/libexec/PlistBuddy -c "Print :YANDEX_MAPKIT_API_KEY" "$APP/Info.plist" 2>/dev/null || true)"
+          case "$MAPKIT_KEY_VALUE" in
+            ''|'$('*)
+              echo "::notice title=mapkit-key::не задан (сборка без ключа: тайлы не загрузятся)"
+              ;;
+            *)
+              echo "::notice title=mapkit-key::задан"
+              ;;
+          esac
           echo "=== Ресурсы в bundle ==="
           ls "$APP" | grep -E "(json|xcprivacy)$" || true
           # Данные приложения обязаны лежать внутри .app: без них экраны пустые.
