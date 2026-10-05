@@ -61,6 +61,29 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Configure MapKit key
+        working-directory: iosApp
+        env:
+          # Секрет репозитория. Пусто, если не задан — тогда собираем без ключа.
+          MAPKIT_KEY: ${{ secrets.YANDEX_MAPKIT_API_KEY }}
+        run: |
+          set -euo pipefail
+          # Файл в .gitignore: создаётся здесь, на раннере, и живёт одну сборку.
+          cp Secrets.xcconfig.template Secrets.xcconfig
+
+          if [ -n "${MAPKIT_KEY:-}" ]; then
+            # Ключ попадает ТОЛЬКО в runtime: build settings -> Info.plist.
+            # Само значение не печатается ни в лог, ни в notice.
+            printf 'YANDEX_MAPKIT_API_KEY = %s\n' "$MAPKIT_KEY" >> Secrets.xcconfig
+            # Артефакт .app публикуется открыто и содержит Info.plist, поэтому
+            # с ключом внутри его публиковать нельзя: ключ уедет в открытый доступ.
+            echo "PUBLISH_APP_ARTIFACT=false" >> "$GITHUB_ENV"
+            echo "::notice title=mapkit-key::задан (артефакт .app не публикуется: в Info.plist ключ карты)"
+          else
+            echo "PUBLISH_APP_ARTIFACT=true" >> "$GITHUB_ENV"
+            echo "::notice title=mapkit-config::секрет YANDEX_MAPKIT_API_KEY не задан — сборка без ключа, тайлы не загрузятся"
+          fi
+
       - name: Select Xcode
         run: |
           set -uo pipefail
@@ -133,21 +156,11 @@ jobs:
         working-directory: iosApp
         run: |
           set -euo pipefail
-          # Локальные секреты: файла в репозитории нет (он в .gitignore),
-          # поэтому CI создаёт его из шаблона — с ПУСТЫМ ключом.
-          # Значение отсюда читает Podfile (post_install) и кладёт в build
-          # settings; пустое значение = «ключ не задан».
-          #
-          # Секрет YANDEX_MAPKIT_API_KEY сознательно НЕ подставляется в этот
-          # билд: артефакт .app публикуется и содержит Info.plist, то есть ключ
-          # уехал бы в открытый доступ. Ключ нужен для релизной (архивной)
-          # сборки, где артефакт не публикуется; здесь сборка обязана работать
-          # без него, а его отсутствие видно как configuration state.
+          # Secrets.xcconfig (в .gitignore) создаётся шагом «Configure MapKit key»
+          # и читается Podfile: значение уходит в build settings, затем в Info.plist.
           if [ ! -f Secrets.xcconfig ]; then
-            cp Secrets.xcconfig.template Secrets.xcconfig
-            echo "Secrets.xcconfig создан из шаблона (ключ не задан)"
-          else
-            echo "Secrets.xcconfig уже существует — не трогаем"
+            echo "::error::нет Secrets.xcconfig — шаг «Configure MapKit key» не отработал"
+            exit 1
           fi
           xcodegen generate 2>&1 | tee xcodegen.log
           if [ ! -d "NorilskTransit.xcodeproj" ]; then
@@ -427,6 +440,9 @@ jobs:
           echo "::notice title=app-resources::$(ls "$APP" | grep -E '(json|xcprivacy)' | tr '\n' ' ')"
 
       - name: Upload .app artifact
+        # С ключом карты внутри .app публиковать нельзя: артефакт открытый,
+        # а ключ лежит в Info.plist. Проверки .app при этом уже выполнены.
+        if: env.PUBLISH_APP_ARTIFACT != 'false'
         uses: actions/upload-artifact@v6
         with:
           name: NorilskTransit-app-${{ github.sha }}
@@ -449,5 +465,5 @@ jobs:
             echo "- JSON-ассеты: маршруты, расписания, маршрут 31 и 31Э"
             echo "- xcodebuild: компиляция под iOS ${{ matrix.ios }} Simulator"
             echo "- unit-тесты: ${TEST_SUMMARY:-не запускались}"
-            echo "- .app bundle: проверен и загружен как artifact"
+            echo "- .app bundle: проверен (артефакт публикуется, только если сборка без ключа карты)"
           } >> "$GITHUB_STEP_SUMMARY"
