@@ -1,0 +1,2 @@
+# Preserve the production Android schedule byte-for-byte (including CRLF).
+norilsk_schedule.json -text
