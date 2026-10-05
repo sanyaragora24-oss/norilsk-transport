@@ -152,23 +152,12 @@ struct MapScreen: View {
 
     private var mapRoutes: [MapRouteOverlay] {
         guard let index = store.index else { return [] }
-        if let selected = selectedVariant {
-            guard selected.hasGeometry else { return [] }
-            return [
-                MapRouteOverlay(id: selected.id,
-                                points: selected.polyline,
-                                color: UIColor(argb: selected.colorArgb),
-                                isSelected: true)
-            ]
-        }
-        return index.variants
-            .filter { $0.hasGeometry }
-            .map { MapRouteOverlay(id: $0.id, points: $0.polyline, color: UIColor(argb: $0.colorArgb), isSelected: false) }
+        return MapOverlays.routes(variants: index.variants, selectedId: selectedVariant?.id)
     }
 
     private var mapStops: [MapStopOverlay] {
-        guard let selected = selectedVariant, selected.hasGeometry else { return [] }
-        return selected.stops.map { MapStopOverlay(id: $0.id, lat: $0.lat, lon: $0.lon, title: $0.name) }
+        guard let index = store.index else { return [] }
+        return MapOverlays.stops(variants: index.variants, selectedId: selectedVariant?.id)
     }
 
     // MARK: - Кнопки
@@ -265,20 +254,10 @@ struct SelectedRouteCard: View {
 }
 
 // MARK: - Обёртка карты
-
-struct MapRouteOverlay: Hashable {
-    let id: String
-    let points: [LatLon]
-    let color: UIColor
-    let isSelected: Bool
-}
-
-struct MapStopOverlay: Hashable {
-    let id: Int
-    let lat: Double
-    let lon: Double
-    let title: String
-}
+//
+// MapRouteOverlay и MapStopOverlay живут в Core (NorilskTransitCore): логика
+// «что рисовать» там же и покрыта тестами. Цвет хранится как ARGB, UIColor
+// создаётся уже здесь, на слое View.
 
 struct TransitMapView: UIViewRepresentable {
     let routes: [MapRouteOverlay]
@@ -326,8 +305,7 @@ struct TransitMapView: UIViewRepresentable {
         // Перерисовываем только если состав объектов реально изменился:
         // иначе 54 полилинии с тысячами точек пересоздавались бы при каждом
         // обновлении SwiftUI (например, при каждом тике таймера расписаний).
-        let signature = routes.map { "\($0.id)-\($0.isSelected)-\($0.points.count)" }.joined(separator: ",")
-            + "|" + stops.map { String($0.id) }.joined(separator: ",")
+        let signature = MapOverlays.drawSignature(routes: routes, stops: stops)
         let shouldRedraw = context.coordinator.lastDrawSignature != signature
         if shouldRedraw {
             context.coordinator.lastDrawSignature = signature
@@ -340,7 +318,7 @@ struct TransitMapView: UIViewRepresentable {
                 let points = overlay.points.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }
                 let polyline = objects.addPolyline(with: YMKPolyline(points: points))
                 // У YMKPolylineMapObject нет свойства strokeColor — только setStrokeColorWith(_:)
-                polyline.setStrokeColorWith(overlay.color)
+                polyline.setStrokeColorWith(UIColor(argb: overlay.colorArgb))
                 polyline.strokeWidth = overlay.isSelected ? 6 : 3.5
                 polyline.zIndex = overlay.isSelected ? 10 : 1
                 // Тап по линии выделяет маршрут (навигация «карта -> маршрут»)
