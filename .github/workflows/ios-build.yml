@@ -363,9 +363,13 @@ jobs:
           du -sh "$APP"
           echo "=== Info.plist (ключевые поля) ==="
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :UIRequiredDeviceCapabilities" "$APP/Info.plist"
+          APP_VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")"
+          APP_BUILD="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")"
+          # Версию публикуем как notice: по ней видно, что собранный .app несёт
+          # именно ту версию, что задана в project.yml (в логе это искать неудобно).
+          echo "версия: $APP_VERSION ($APP_BUILD)"
+          echo "::notice title=app-version::$APP_VERSION ($APP_BUILD)"
           echo "=== Ресурсы в bundle ==="
           ls "$APP" | grep -E "(json|xcprivacy)$" || true
           # Данные приложения обязаны лежать внутри .app: без них экраны пустые.
