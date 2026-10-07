@@ -1,0 +1,40 @@
+# --- Secrets and credentials (never commit) ---
+keys.txt
+local.properties
+google-services.json
+*.google-services.json
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.creds*
+*.p12
+*.pem
+*.keystore.bak
+
+# --- Build output ---
+.gradle/
+.kotlin/
+**/build/
+build/
+*.apk
+*.aab
+*.apk.txt
+*.dex
+project.zip
+
+# --- Release staging (APK bundles are published as GitHub Release assets) ---
+release-v*/
+
+# --- Old project copies kept beside the working tree ---
+norilsk_fixes_jun11/
+norilsk-transport/
+
+# --- Editors / tooling ---
+.idea/
+*.iml
+.continue/
+
+# --- Logs ---
+*.log
