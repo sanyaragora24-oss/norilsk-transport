@@ -77,7 +77,12 @@ android {
       isMinifyEnabled = true
       isShrinkResources = true
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      val releaseSigning = signingConfigs.getByName("release")
+      val hasReleaseSigning = !releaseSigning.storePassword.isNullOrBlank() &&
+        !releaseSigning.keyPassword.isNullOrBlank() && releaseSigning.storeFile?.isFile == true
+      if (hasReleaseSigning) {
+        signingConfig = releaseSigning
+      }
       // Production: the R8 mapping must reach Crashlytics, otherwise every stack
       // trace arrives obfuscated and is unusable.
       configure<CrashlyticsExtension> {

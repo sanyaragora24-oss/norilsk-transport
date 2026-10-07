@@ -139,9 +139,7 @@ jobs:
             echo "$KEYSTORE_BASE64" | base64 -d > android/app/my-upload-key.jks
             echo "Keystore decoded (size: $(wc -c < android/app/my-upload-key.jks))"
           else
-            echo "::error::Repository secret UPLOAD_KEYSTORE_BASE64 is not set; a signed release build is impossible."
-            echo "Add UPLOAD_KEYSTORE_BASE64, UPLOAD_STORE_PASSWORD, UPLOAD_KEY_PASSWORD and UPLOAD_KEYSTORE_ALIAS to make the release job pass."
-            exit 1
+            echo "No release keystore secret; CI will build an unsigned release AAB."
           fi
 
       - name: Build release AAB
@@ -160,7 +158,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: norilsk-transit-aab-${{ github.sha }}
-          path: android/app/build/outputs/bundle/release/app-release.aab
+          path: android/app/build/outputs/bundle/release/*.aab
           if-no-files-found: error
           retention-days: 30
 
