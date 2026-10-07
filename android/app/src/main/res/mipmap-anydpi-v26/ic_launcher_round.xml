@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Round adaptive launcher icon, Norilsk Transit.
+
+  Same construction as ic_launcher.xml: 68dp of artwork on a 108dp canvas over a
+  solid navy background. Launchers that pick this variant apply a circular mask, and
+  the 68dp sizing keeps the text and bus inside the 72dp cut so nothing is cropped.
+  See ic_launcher.xml for the full rationale.
+
+  No <monochrome> layer: the artwork is a colour photograph, and a themed-icon
+  silhouette of it renders as an unreadable smear.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

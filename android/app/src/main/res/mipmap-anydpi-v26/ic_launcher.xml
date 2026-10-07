@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive launcher icon, Norilsk Transit.
+
+  The composition is a 68dp square of the final artwork placed on a 108dp canvas
+  (20..88 in both axes). Launchers mask this to at most a 72dp circle, so the
+  centred text and the bus stay intact and only the empty sky/snow in the corners
+  is cut. The solid navy background fills whatever the mask does not cover, which
+  keeps the badge square and the artwork uncropped.
+
+  No <monochrome> layer: the artwork is a colour photograph, and a themed-icon
+  silhouette of it renders as an unreadable smear.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>
