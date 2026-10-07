@@ -149,6 +149,7 @@ jobs:
           STORE_PASSWORD: ${{ secrets.UPLOAD_STORE_PASSWORD || '' }}
           KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD || '' }}
         run: |
+          chmod +x gradlew
           ./gradlew :app:bundleRelease --no-daemon
           ls -la app/build/outputs/bundle/release/
 
