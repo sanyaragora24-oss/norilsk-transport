@@ -1,5 +1,15 @@
 # GitHub Actions: Android-сборка через ubuntu-latest.
 # Проверяет, что приложение компилируется, тесты проходят.
+#
+# Android-проект живёт в android/, а не в корне репозитория: корень содержит
+# iOS-приложение и документацию, и смешивать их нельзя.
+#
+# Секреты в репозиторий не попадают:
+#  - google-services.json для CI берётся из android/ci/google-services.ci.json
+#    (заглушка без единого реального значения);
+#  - YANDEX_MAPKIT_API_KEY — только из GitHub Secrets, во временный local.properties
+#    раннера, который никогда не коммитится;
+#  - keystore — только из Secrets, декодируется в android/ и тоже не коммитится.
 
 name: Android Build
 
@@ -7,10 +17,17 @@ on:
   push:
     branches: [main]
     paths:
-      - 'app/**'
+      - 'android/app/**'
+      - 'android/*.gradle.kts'
+      - 'android/gradle/**'
+      - 'android/gradle.properties'
+      - 'android/ci/**'
       - '.github/workflows/android-build.yml'
   pull_request:
     branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android-build.yml'
   workflow_dispatch:
 
 concurrency:
@@ -37,13 +54,27 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-            app/build
+            android/app/build
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/*.gradle') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      - name: Install CI google-services placeholder
+        run: cp android/ci/google-services.ci.json android/app/google-services.json
+
+      - name: Provide Yandex MapKit key to the build
+        env:
+          YANDEX_KEY: ${{ secrets.YANDEX_MAPKIT_API_KEY }}
+        run: |
+          if [ -n "$YANDEX_KEY" ]; then
+            printf 'YANDEX_MAPKIT_API_KEY=%s\n' "$YANDEX_KEY" >> android/local.properties
+            echo "MapKit key supplied from Secrets"
+          else
+            echo "No MapKit key in Secrets; unit tests do not require it"
+          fi
+
       - name: Run unit tests
-        working-directory: app/..
+        working-directory: android
         run: |
           chmod +x gradlew
           ./gradlew :app:testDebugUnitTest --no-daemon
@@ -54,8 +85,8 @@ jobs:
         with:
           name: test-results
           path: |
-            app/build/test-results/**/*.xml
-            app/build/reports/tests/**/*.html
+            android/app/build/test-results/**/*.xml
+            android/app/build/reports/tests/**/*.html
           retention-days: 7
 
   build:
@@ -78,26 +109,42 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-            app/build
+            android/app/build
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts', '**/*.gradle') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
+
+      - name: Install CI google-services placeholder
+        run: cp android/ci/google-services.ci.json android/app/google-services.json
+
+      - name: Provide Yandex MapKit key to the build
+        env:
+          YANDEX_KEY: ${{ secrets.YANDEX_MAPKIT_API_KEY }}
+        run: |
+          if [ -z "$YANDEX_KEY" ]; then
+            echo "::error::Repository secret YANDEX_MAPKIT_API_KEY is required for a release build."
+            exit 1
+          fi
+          printf 'YANDEX_MAPKIT_API_KEY=%s\n' "$YANDEX_KEY" >> android/local.properties
+          echo "MapKit key supplied from Secrets"
 
       - name: Decode keystore from secret
         env:
           KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
         run: |
+          # build.gradle.kts resolves the keystore as ${rootDir}/my-upload-key.jks,
+          # and rootDir for this module is android/. Decode it there.
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > app/upload-key.jks
-            echo "Keystore decoded (size: $(wc -c < app/upload-key.jks))"
+            echo "$KEYSTORE_BASE64" | base64 -d > android/my-upload-key.jks
+            echo "Keystore decoded (size: $(wc -c < android/my-upload-key.jks))"
           else
             echo "No keystore in secrets; building unsigned"
           fi
 
       - name: Build release AAB
-        working-directory: app/..
+        working-directory: android
         env:
-          KEYSTORE_PATH: ${{ secrets.UPLOAD_KEYSTORE_PATH || 'upload-key.jks' }}
+          KEYSTORE_PATH: ${{ secrets.UPLOAD_KEYSTORE_PATH || 'my-upload-key.jks' }}
           KEYSTORE_ALIAS: ${{ secrets.UPLOAD_KEYSTORE_ALIAS || '' }}
           STORE_PASSWORD: ${{ secrets.UPLOAD_STORE_PASSWORD || '' }}
           KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD || '' }}
@@ -109,7 +156,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: norilsk-transit-aab-${{ github.sha }}
-          path: app/build/outputs/bundle/release/app-release.aab
+          path: android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
           retention-days: 30
 
