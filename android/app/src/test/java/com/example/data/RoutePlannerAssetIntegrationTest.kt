@@ -28,9 +28,12 @@ class RoutePlannerAssetIntegrationTest {
     }
 
     @Test
-    fun restoredAssetsContainAllRoutesAndBuildDirect31Trip() {
+    fun restoredAssetsExcludeObsolete31BAndBuildDirect31Trip() {
         val routes = routes()
-        assertEquals(62, routes.size)
+        assertEquals(61, routes.size)
+        assertTrue(routes.none { it.id == "400202:1" || it.number == "31Б" })
+        assertEquals(6, routes.count { it.number == "31" })
+        assertEquals(6, routes.count { it.number == "31Э" })
         val direct31 = routes.single { it.id == "2246:0" }
 
         val journey = RoutePlanner.plan(listOf(direct31), direct31.stops.first(), direct31.stops.last())

@@ -12,10 +12,12 @@ class ScheduleAssetIntegrationTest {
     private fun snapshot() = Json { ignoreUnknownKeys = true }
         .decodeFromString<ScheduleFileDto>(File("src/main/assets/norilsk_schedule.json").readText())
 
-    @Test fun verifiedSnapshotContainsAll62Directions() {
+    @Test fun verifiedSnapshotContainsAllRemaining61Directions() {
         val snapshot = snapshot()
         assertEquals("04.10.2026", snapshot.dataDate)
-        assertEquals(62, snapshot.routes.size)
+        assertEquals(61, snapshot.routes.size)
+        assertFalse(snapshot.routes.containsKey("400202:1"))
+        assertTrue(snapshot.routes.values.none { it.number == "31Б" })
         snapshot.routes.values.filter { it.hasSchedule }.forEach { route ->
             assertTrue(route.timetable.any { it.weekday.isNotEmpty() || it.weekend.isNotEmpty() })
         }
@@ -42,7 +44,7 @@ class ScheduleAssetIntegrationTest {
 
     @Test fun missingOfficialScheduleDoesNotBecomeInventedTimes() {
         val routes = snapshot().routes
-        listOf("400201:0", "400201:1", "400202:1", "400203:0", "400203:1", "400204:1").forEach { id ->
+        listOf("400201:0", "400201:1", "400203:0", "400203:1", "400204:1").forEach { id ->
             assertFalse(routes.getValue(id).hasSchedule)
             assertTrue(routes.getValue(id).weekday.isEmpty())
             assertTrue(routes.getValue(id).weekend.isEmpty())
