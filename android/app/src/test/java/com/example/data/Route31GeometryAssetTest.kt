@@ -30,6 +30,25 @@ class Route31GeometryAssetTest {
     }
 
     @Test
+    fun every31VariantGoesViaAbkYuzhnyBut31EIsNotPartOfThisRule() {
+        val route31 = routes().filter { it.number == "31" }
+
+        assertEquals(6, route31.size)
+        route31.forEach { route ->
+            val abkYuzhny = route.stops.firstOrNull { it.name == "АБК Южный" }
+            assertTrue("${route.id}: 31 must call at АБК Южный", abkYuzhny != null)
+
+            val distanceToGeometry = route.polyline.minOf { point ->
+                distanceMeters(point, abkYuzhny!!.location)
+            }
+            assertTrue(
+                "${route.id}: 31 geometry must pass АБК Южный (nearest=${distanceToGeometry.toInt()} m)",
+                distanceToGeometry <= 30.0
+            )
+        }
+    }
+
+    @Test
     fun all31And31EVariantsKeepTheVerifiedAssetGeometry() {
         val target = routes().filter { it.number == "31" || it.number == "31Э" }
         val expectedIds = setOf(
