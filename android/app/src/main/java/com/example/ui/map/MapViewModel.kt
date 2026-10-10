@@ -16,6 +16,7 @@ import com.example.data.ArrivalEstimator
 import com.example.data.Bus
 import com.example.data.RoadGeometryRepository
 import com.example.data.Route
+import com.example.data.RouteGeometryPolicy
 import com.example.data.RoutePlanner
 import com.example.data.RouteRepository
 import com.example.data.Stop
@@ -605,8 +606,14 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                 isBuildingRoads = false
             ) 
         }
-        if (route != null) {
+        if (route != null && !RouteGeometryPolicy.useVerifiedAssetGeometry(route)) {
             buildRoadPolyline(route)
+        } else if (route != null) {
+            // 31/31Э contain industrial service-road sections.  The bundled
+            // geometry is verified; MapKit's public road graph has previously
+            // returned a 100+ km detour here, so do not replace it dynamically.
+            roadGeometryRepository.discardCachedPolyline(route.id)
+            Log.d("MapViewModel", "Using verified asset geometry for ${route.id}")
         }
     }
 

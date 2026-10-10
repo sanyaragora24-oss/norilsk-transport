@@ -59,6 +59,12 @@ class RoadGeometryRepository(context: Context) {
         if (!cacheDir.exists()) cacheDir.mkdirs()
     }
 
+    /** Removes an obsolete router result; callers retain their asset geometry. */
+    fun discardCachedPolyline(routeId: String) {
+        val safeRouteId = routeId.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80)
+        File(cacheDir, "${safeRouteId.ifBlank { "route" }}.json").delete()
+    }
+
     suspend fun getRoadPolyline(routeId: String, stops: List<Point>): List<Point> {
         currentCoroutineContext().ensureActive()
         val safeRouteId = routeId.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80)

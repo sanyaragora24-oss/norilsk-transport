@@ -2,7 +2,7 @@ package com.example.data
 
 import java.util.Locale
 
-/** Numeric-first ordering for public route numbers: 1А, 1Б, 2, …, 31, 31Б, 31Э. */
+/** Numeric-first ordering for public route numbers: 1А, 1Б, 2, …, 31, 31Э. */
 fun compareRouteNumbers(left: String, right: String): Int {
     val a = routeNumberKeyParts(left)
     val b = routeNumberKeyParts(right)
