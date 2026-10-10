@@ -43,7 +43,7 @@ class Route31GeometryAssetTest {
             }
             assertTrue(
                 "${route.id}: 31 geometry must pass АБК Южный (nearest=${distanceToGeometry.toInt()} m)",
-                distanceToGeometry <= 30.0
+                distanceToGeometry <= 2.0
             )
         }
     }
