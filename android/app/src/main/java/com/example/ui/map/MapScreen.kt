@@ -1162,6 +1162,19 @@ fun MapScreen(
     }
 }
 
+/**
+ * Точка камеры, при которой [point] окажется на [dp] выше центра экрана
+ * (Web Mercator, мир на масштабе z — 256·2^z dp, как в StopLabelPolicy).
+ */
+private fun shiftSouthOnScreen(point: Point, zoom: Float, dp: Float): Point {
+    val worldSize = 256.0 * Math.pow(2.0, zoom.toDouble())
+    val latRad = Math.toRadians(point.latitude)
+    val y = (1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0 * worldSize
+    val shiftedY = (y + dp) / worldSize
+    val lat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * shiftedY))))
+    return Point(lat, point.longitude)
+}
+
 /** ARGB цвета Compose в виде Long — для расчёта контраста в [RouteColors]. */
 private fun Color.toArgbLong(): Long {
     fun ch(v: Float) = (v.coerceIn(0f, 1f) * 255f + 0.5f).toLong()
@@ -1484,8 +1497,13 @@ fun YandexMapView(
                 }
                 is MapCommand.FocusPoints -> fitToVisibleArea(command.points)
                 is MapCommand.FocusUserLocation -> {
+                    // Вместе с «Где я» снизу открывается панель «Ближайшие остановки»:
+                    // в центре карты метка пассажира оказывалась под ней. Ставим точку
+                    // примерно на 30 % высоты карты — над панелью.
+                    val zoom = 15f
+                    val heightDp = mapView.mapWindow.height() / density
                     mapView.mapWindow.map.move(
-                        CameraPosition(command.point, 15f, 0f, 0f),
+                        CameraPosition(shiftSouthOnScreen(command.point, zoom, heightDp * 0.2f), zoom, 0f, 0f),
                         com.yandex.mapkit.Animation(com.yandex.mapkit.Animation.Type.SMOOTH, 0.8f),
                         null
                     )
