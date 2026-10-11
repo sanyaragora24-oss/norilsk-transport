@@ -16,11 +16,18 @@ plugins {
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
-  FileInputStream(localPropertiesFile).use { localProperties.load(it) }
+  // UTF-8 reader: Properties.load(InputStream) decodes ISO-8859-1 and turns a
+  // UTF-8 BOM into "ï»¿", which no longer matches the BOM stripped below.
+  FileInputStream(localPropertiesFile).reader(Charsets.UTF_8).use { localProperties.load(it) }
 }
 
+// Values pasted into GitHub Secrets from a text file can carry a UTF-8 BOM or a
+// trailing newline; MapKit then rejects the key ("Invalid api key") and the map
+// never loads in CI builds. Strip both before the value reaches BuildConfig.
 fun configuredProperty(name: String): String =
-  providers.gradleProperty(name).orNull ?: localProperties.getProperty(name) ?: ""
+  (providers.gradleProperty(name).orNull ?: localProperties.getProperty(name) ?: "")
+    .removePrefix("\uFEFF")
+    .trim()
 
 fun String.asBuildConfigString(): String =
   "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
