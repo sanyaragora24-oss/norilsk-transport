@@ -463,6 +463,7 @@ fun MapScreen(
                 onCameraMoved = { viewModel.onCameraMoved(it) },
                 isSheetOpen = showRoutesSheet,
                 hasTopStatus = uiState.busDataStatus != null,
+                hasLocationPermission = hasLocationPermission,
                 nightMode = isDarkUi,
                 commands = viewModel.mapCommands
             )
@@ -1357,6 +1358,7 @@ fun YandexMapView(
     onCameraMoved: (Float) -> Unit,
     isSheetOpen: Boolean,
     hasTopStatus: Boolean = false,
+    hasLocationPermission: Boolean = false,
     nightMode: Boolean,
     commands: kotlinx.coroutines.flow.SharedFlow<MapCommand>
 ) {
@@ -1385,8 +1387,22 @@ fun YandexMapView(
 
     val locationLayer = remember {
         MapKitFactory.getInstance().createUserLocationLayer(mapView.mapWindow).apply {
-            isVisible = true
+            isVisible = hasLocationPermission
         }
+    }
+    // MapKit подписывается на геолокацию при включении слоя и после
+    // SecurityException (разрешения ещё нет) сам не повторяет попытку: на первом
+    // запуске метка «я здесь» не появлялась до перезапуска приложения. Слой
+    // включается только с разрешением, а при его выдаче location manager
+    // MapKit перезапускается.
+    var locationLayerArmed by remember { mutableStateOf(hasLocationPermission) }
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission && !locationLayerArmed) {
+            MapKitFactory.getInstance().resetLocationManagerToDefault()
+            locationLayer.isVisible = false
+            locationLayerArmed = true
+        }
+        locationLayer.isVisible = hasLocationPermission
     }
 
     val routeCollection = remember { mapView.mapWindow.map.mapObjects.addCollection() }
