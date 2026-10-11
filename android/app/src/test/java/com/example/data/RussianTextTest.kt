@@ -29,4 +29,10 @@ class RussianTextTest {
         assertEquals("по расписанию", arrivalSourceLabel(ArrivalSource.SCHEDULE))
         assertEquals("по GPS", arrivalSourceLabel(ArrivalSource.LIVE_GPS))
     }
+
+    @Test
+    fun hyphenatedNamesGetAnInvisibleBreakOpportunity() {
+        assertEquals("Административно-\u200Bделовой центр", breakableAfterHyphens("Административно-деловой центр"))
+        assertEquals("Пождепо (Надежда)", breakableAfterHyphens("Пождепо (Надежда)"))
+    }
 }

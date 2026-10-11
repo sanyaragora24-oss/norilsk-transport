@@ -33,3 +33,10 @@ fun arrivalSourceLabel(source: ArrivalSource): String = when (source) {
     ArrivalSource.LIVE_GPS -> "по GPS"
     ArrivalSource.SCHEDULE -> "по расписанию"
 }
+
+/**
+ * Длинные составные названия («Административно-деловой центр») система
+ * переносила посреди слова. Пробел нулевой ширины после дефиса даёт явную
+ * точку переноса; на экране и в TalkBack он не виден.
+ */
+fun breakableAfterHyphens(text: String): String = text.replace("-", "-\u200B")

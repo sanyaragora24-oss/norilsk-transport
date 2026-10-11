@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.Hyphens
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextOverflow
 import com.example.data.ArrivalSource
 import com.example.data.arrivalPhrase
@@ -204,12 +206,22 @@ fun RouteSummaryItem(
         RouteNumberBadge(number = summary.number, colorArgb = summary.color)
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "→\u00A0${summary.destination}",
-                style = MaterialTheme.typography.bodyLarge,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+            // Стрелка отдельно от названия: длинное название переносится по словам,
+            // а не посреди слова и не оставляет «→» одну на строке.
+            Row {
+                Text(text = "→ ", style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = com.example.data.breakableAfterHyphens(summary.destination),
+                    // «Административно-деловой» переносится по дефису,
+                    // а не посреди слова без знака переноса.
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        hyphens = Hyphens.None,
+                        lineBreak = LineBreak.Simple
+                    ),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = "Отправление: ${summary.origin}",
