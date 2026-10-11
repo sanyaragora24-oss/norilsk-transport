@@ -64,10 +64,14 @@ class Route31GeometryAssetTest {
 
     @Test
     fun all31And31EPolylinesStayOnTheStopCorridorWithoutASouthernLoop() {
-        routes().filter { it.number == "31" || it.number == "31Э" }.forEach { route ->
-            val stopChainMeters = route.stops.zipWithNext().sumOf { (a, b) -> distanceMeters(a.location, b.location) }
+        val all = routes()
+        all.filter { it.number == "31" || it.number == "31Э" }.forEach { route ->
+            // 31Э (экспресс) едет по той же дороге, что и обычный 31, но почти без
+            // остановок, поэтому коридор для него задают остановки парного варианта 31.
+            val corridor = all.first { it.id == route.id.replace("3467:", "2246:") }.stops
+            val stopChainMeters = corridor.zipWithNext().sumOf { (a, b) -> distanceMeters(a.location, b.location) }
             val polylineMeters = route.polyline.zipWithNext().sumOf { (a, b) -> distanceMeters(a, b) }
-            val southLimit = route.stops.minOf { it.location.latitude } - 0.004
+            val southLimit = corridor.minOf { it.location.latitude } - 0.004
 
             assertTrue("${route.id}: polyline must not leave the stop corridor southward", route.polyline.all {
                 it.latitude >= southLimit

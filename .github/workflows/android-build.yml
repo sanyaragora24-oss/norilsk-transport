@@ -162,6 +162,25 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Build release APK
+        working-directory: android
+        env:
+          KEYSTORE_PATH: ${{ secrets.UPLOAD_KEYSTORE_PATH || 'my-upload-key.jks' }}
+          KEYSTORE_ALIAS: ${{ secrets.UPLOAD_KEYSTORE_ALIAS || '' }}
+          STORE_PASSWORD: ${{ secrets.UPLOAD_STORE_PASSWORD || '' }}
+          KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD || '' }}
+        run: |
+          ./gradlew :app:assembleRelease --no-daemon
+          ls -la app/build/outputs/apk/release/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: norilsk-transit-apk-${{ github.sha }}
+          path: android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Build summary
         if: always()
         run: |

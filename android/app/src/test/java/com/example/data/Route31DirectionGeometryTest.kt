@@ -1,7 +1,6 @@
 package com.example.data
 
 import java.io.File
-import java.security.MessageDigest
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlinx.serialization.json.Json
@@ -27,6 +26,9 @@ class Route31DirectionGeometryTest {
 
     private fun route(id: String) = routes.first { it.str("id") == id }
     private fun JsonObject.str(key: String) = getValue(key).jsonPrimitive.content
+    private fun stopNames(id: String) = route(id).getValue("stops").jsonArray.map { it.jsonObject.str("name") }
+    private fun stopsOf(id: String) = route(id).getValue("stops").jsonArray.map { it.jsonObject }
+    private fun JsonObject.at() = getValue("lat").jsonPrimitive.double to getValue("lon").jsonPrimitive.double
     private fun JsonObject.points(key: String): List<Pair<Double, Double>> =
         (getValue(key) as JsonArray).map {
             val o = it.jsonObject
@@ -34,23 +36,40 @@ class Route31DirectionGeometryTest {
         }
 
     @Test
-    fun all31EVariantsAreByteIdenticalToTheVerifiedSnapshot() {
-        // SHA-256 сериализации каждого варианта 31Э в состоянии до правок 31
-        // (коммиты 77557d3 … 1c964b9 — совпадают побайтно). 31Э менять нельзя.
+    fun all31EVariantsAreTheExpressNotACopyOf31() {
+        // 2ГИС, Яндекс Карты и схема МУП 31e: на трассе Норильск – Кайеркан
+        // экспресс останавливается только у Медного завода и Металлургического цеха.
+        val express = listOf("Медный завод", "Металлургический цех")
+        val kayerkan = listOf("Торгово-бытовой комплекс", "Строительная", "ТЦ (Кайеркан)", "Поликлиника (Кайеркан)", "Победы", "Торгово-бытовой комплекс")
         val expected = mapOf(
-            "3467:0" to "3a77522448a84c31824e218b1f2f951048ef1e02513a47a02df08c9f2ef2b2ac",
-            "3467:1" to "ef483d6223c6d372969a64bdd4dfde735f227df41d00e122de07f8ffe08fab41",
-            "3467:2" to "88183ade3da4a8bd8384b4901f1a1699c4822079a161d7fd65db4b5ae051b32a",
-            "3467:3" to "eb97975e8a4b2685dbe3ad0415370be88d0a3119c978d594c393851b12b2a7d4",
-            "3467:4" to "2177f35ba25202eab8ac8a5d5c763f24e3933a3e64986d1c0f0332993165ec0f",
-            "3467:5" to "3ee836e91601057df166fdeda4f94a3a72bd031501db6371e42e79f488a2fa51"
+            "3467:0" to listOf("Административно-деловой центр") + express + kayerkan,
+            "3467:1" to listOf("Торгово-бытовой комплекс") + express.reversed() + "Административно-деловой центр",
+            "3467:2" to stopNames("2246:2").takeWhile { it != "Вокзальная" } + express + kayerkan,
+            "3467:3" to listOf("Торгово-бытовой комплекс") + express.reversed() + stopNames("2246:3").dropWhile { it != "Административно-деловой центр" },
+            "3467:4" to stopNames("2246:4").takeWhile { it != "Вокзальная" } + express + kayerkan,
+            "3467:5" to listOf("Торгово-бытовой комплекс") + express.reversed() + stopNames("2246:5").dropWhile { it != "Красноярская" }
         )
-        val actual = routes.filter { it.str("number") == "31Э" }.associate { r ->
-            val serialized = r.toString()
-            assertTrue("${r.str("id")} must appear verbatim in the asset", raw.contains(serialized))
-            r.str("id") to sha256(serialized)
+        assertEquals(expected, routes.filter { it.str("number") == "31Э" }.associate { it.str("id") to stopNames(it.str("id")) })
+        expected.keys.forEach { id ->
+            val r = route(id)
+            val twin = route(id.replace("3467:", "2246:"))
+            assertEquals(id, listOf(twin.str("direction"), twin.str("origin"), twin.str("destination")),
+                listOf(r.str("direction"), r.str("origin"), r.str("destination")))
         }
-        assertEquals(expected, actual)
+    }
+
+    @Test
+    fun express31ESkipsTheAbkSpurAndTheTsbkLoopAndNeverReverses() {
+        val abk = 69.3215728 to 87.9627228
+        val tsbk = 69.3282946 to 87.9787519
+        routes.filter { it.str("number") == "31Э" }.forEach { r ->
+            val id = r.str("id")
+            val line = r.points("polyline")
+            assertTrue("$id must not enter the ABK Yuzhny spur", line.minOf { meters(it, abk) } > 500.0)
+            assertTrue("$id must not make the TsBK loop", line.minOf { meters(it, tsbk) } > 500.0)
+            assertEquals("$id: express has no dead-end reversals", emptyList<Pair<Double, Double>>(), uTurns(line))
+            assertFalse("$id: polyline self-intersects", selfIntersects(line))
+        }
     }
 
     @Test
@@ -59,10 +78,10 @@ class Route31DirectionGeometryTest {
     }
 
     @Test
-    fun reverse31VariantsDoNotReturnTowardRmc2AfterTheAbkSpur() {
-        // Единственный разворот в обратных вариантах — тупиковый заезд на АБК
-        // Южный. Лишний возврат ~72 м к РМЦ-2 после заезда убран.
-        listOf("2246:1", "2246:3", "2246:5").forEach { id ->
+    fun every31VariantReversesOnlyAtTheAbkYuzhnyDeadEnd() {
+        // Единственный разворот в любом варианте 31 — тупиковый заезд на АБК
+        // Южный. Лишние «туда-обратно» к старой точке РМЦ-2 на трассе убраны.
+        (0..5).map { "2246:$it" }.forEach { id ->
             val r = route(id)
             val turns = uTurns(r.points("polyline"))
             val abk = r.points("stops")[r.getValue("stops").jsonArray.indexOfFirst {
@@ -92,6 +111,82 @@ class Route31DirectionGeometryTest {
             assertTrue("$id: a segment is implausibly long", line.zipWithNext().all { (a, b) -> meters(a, b) < 800.0 })
             assertFalse("$id: polyline self-intersects", selfIntersects(line))
         }
+    }
+
+    // Эталонные точки ниже — платформы и вершины дороги из 2ГИС (маршруты
+    // 10696654705393696 / 10696654705393698), подтверждённые Яндекс Картами.
+
+    @Test
+    fun rmc2SitsOnTheAbkSpurNotOnTheTrunkRoad() {
+        (0..5).map { "2246:$it" }.forEach { id ->
+            val line = route(id).points("polyline")
+            val rmc2 = stopsOf(id).single { it.str("name").startsWith("РМЦ-2") }.at()
+            assertTrue("$id: РМЦ-2 must be at the 2GIS platform", meters(rmc2, 69.319531 to 87.968543) < 15.0)
+            assertTrue("$id: РМЦ-2 must lie on the line", line.minOf { meters(it, rmc2) } < 2.0)
+            // прямой отросток от развилки к АБК, без дуги ~80 м восточнее
+            assertTrue("$id: spur must follow the straight road", line.minOf { meters(it, 69.32067 to 87.96566) } < 5.0)
+            assertTrue("$id: the old bent spur is gone", line.all { meters(it, 69.32008 to 87.969166) > 30.0 })
+        }
+    }
+
+    @Test
+    fun adcDepartureGoesNorthRoundTheBlockAndArrivalsComeNorthbound() {
+        val departure = 69.3597391 to 88.167439          // 22519, 2ГИС 805381
+        listOf("2246:0", "2246:2", "2246:4", "3467:0", "3467:2", "3467:4").forEach { id ->
+            val line = route(id).points("polyline")
+            val i = line.indexOfFirst { meters(it, departure) < 1.0 }
+            assertTrue("$id: line must pass the departure platform", i >= 0)
+            assertTrue("$id: bus leaves the platform northbound", line[i + 1].first > line[i].first)
+            if (i > 0) assertTrue("$id: bus arrives at the platform northbound", line[i - 1].first < line[i].first)
+            // петля по часовой: верхний проезд квартала, затем вниз по западной улице
+            assertTrue("$id: loop round the block", line.minOf { meters(it, 69.36082 to 88.16546) } < 5.0)
+            assertTrue("$id: no cut across the block", line.all { meters(it, 69.36053 to 88.16876) > 30.0 })
+        }
+        listOf("2246:3", "3467:3").forEach { id ->
+            val adc = stopsOf(id).single { it.str("name") == "Административно-деловой центр" }
+            assertEquals("$id: through service calls at the street platform", "22332", adc.str("id"))
+            val line = route(id).points("polyline")
+            assertTrue("$id: no loop in the ADC yard", line.all { meters(it, 69.359247 to 88.168877) > 50.0 })
+        }
+    }
+
+    @Test
+    fun khlebozavodTerminalsUseTheCityWideStops() {
+        mapOf("2246:2" to "22344", "2246:4" to "22344", "3467:2" to "22344", "3467:4" to "22344").forEach { (id, sid) ->
+            assertEquals(id, sid, stopsOf(id).first().str("id"))
+            assertTrue(id, meters(route(id).points("polyline").first(), 69.338485 to 88.225091) < 1.0)
+        }
+        mapOf("2246:3" to "22343", "2246:5" to "22343", "3467:3" to "22343", "3467:5" to "22343").forEach { (id, sid) ->
+            assertEquals(id, sid, stopsOf(id).last().str("id"))
+            assertTrue(id, meters(route(id).points("polyline").last(), 69.337615 to 88.224548) < 1.0)
+        }
+    }
+
+    @Test
+    fun regular31CallsAtVzhkAndExpressDoesNot() {
+        (0..5).forEach { k ->
+            val names = stopNames("2246:$k")
+            val tbk = if (k % 2 == 0) names.indexOfFirst { it == "Торгово-бытовой комплекс" } else 0
+            val vzhk = names.indexOf("ВЖК")
+            assertEquals("2246:$k: ВЖК sits next to ТБК", if (k % 2 == 0) tbk - 1 else 1, vzhk)
+            assertFalse("3467:$k", "ВЖК" in stopNames("3467:$k"))
+        }
+    }
+
+    @Test
+    fun route31FamilyHasNoRepeatedPointsAndSharedStopsAgreeEverywhere() {
+        val family = routes.filter { it.str("number") == "31" || it.str("number") == "31Э" }
+        family.forEach { r ->
+            assertTrue(r.str("id"), r.points("polyline").zipWithNext().none { (a, b) -> a == b })
+        }
+        val familyIds = family.flatMap { r -> stopsOf(r.str("id")).map { it.str("id") } }.toSet()
+        routes.flatMap { it.getValue("stops").jsonArray.map { s -> s.jsonObject } }
+            .filter { it.str("id") in familyIds }
+            .groupBy { it.str("id") }
+            .forEach { (sid, copies) ->
+                val first = copies.first().at()
+                assertTrue("stop $sid has different coordinates in different routes", copies.all { meters(it.at(), first) < 1.0 })
+            }
     }
 
     private fun uTurns(points: List<Pair<Double, Double>>): List<Pair<Double, Double>> {
@@ -127,6 +222,4 @@ class Route31DirectionGeometryTest {
         return hypot(pa.first - pb.first, pa.second - pb.second)
     }
 
-    private fun sha256(text: String): String =
-        MessageDigest.getInstance("SHA-256").digest(text.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
 }
