@@ -10,6 +10,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,6 +21,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -47,36 +55,37 @@ fun RouteCard(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(8.dp)
         ) {
-            // Number Badge
-            Box(
+            // Number Badge: нажатие сразу показывает маршрут на карте
+            RouteNumberBadge(
+                number = route.number,
+                colorArgb = route.color,
+                size = 56.dp,
+                fontSize = 22.sp,
+                cornerRadius = 12.dp,
+                borderWidth = 2.5.dp,
                 modifier = Modifier
-                    .size(56.dp)
-                    .background(Color(route.color.toInt()), RoundedCornerShape(12.dp))
-                    .border(2.5.dp, Color(0xFF111111), RoundedCornerShape(12.dp))
-                    .clickable(onClick = onBadgeClick),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = route.number,
-                    color = Color.White,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 22.sp,
-                    style = androidx.compose.ui.text.TextStyle(
-                        shadow = androidx.compose.ui.graphics.Shadow(
-                            color = Color.Black,
-                            blurRadius = 3f
-                        )
+                    .clickable(
+                        onClickLabel = "Показать на карте",
+                        role = Role.Button,
+                        onClick = onBadgeClick
                     )
-                )
-            }
+                    .semantics { contentDescription = "Маршрут ${route.number}, показать на карте" }
+            )
             
             Spacer(modifier = Modifier.width(12.dp))
             
-            // Info text
+            // Info text: одна область нажатия на всю карточку направления
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable(onClick = onTextClick)
+                    .clickable(
+                        onClickLabel = "Остановки и расписание",
+                        role = Role.Button,
+                        onClick = onTextClick
+                    )
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = "Маршрут ${route.number}: ${route.origin} → ${route.destination}"
+                    }
                     .padding(vertical = 4.dp)
             ) {
                 Text(
@@ -87,24 +96,21 @@ fun RouteCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                AssistChip(
-                    onClick = onTextClick,
-                    label = { 
-                        Text(
-                            text = "→ ${route.destination}",
-                            style = MaterialTheme.typography.bodySmall,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        ) 
-                    },
-                    modifier = Modifier.height(24.dp),
+                // Направление — подпись, а не отдельная кнопка-чип 24 dp
+                // (раньше это была третья область нажатия в одной строке).
+                Surface(
                     shape = RoundedCornerShape(8.dp),
-                    border = null,
-                    colors = AssistChipDefaults.assistChipColors(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
-                        labelColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                ) {
+                    Text(
+                        text = if (route.origin == route.destination) "↻ кольцевой" else "→\u00A0${route.destination}",
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                     )
-                )
+                }
             }
         }
     }
@@ -279,5 +285,70 @@ private fun HourlyTimetable(times: List<String>) {
                 )
             }
         }
+    }
+}
+
+/**
+ * Бейдж с номером маршрута в цвете перевозчика. Цвет цифр подбирается по
+ * контрасту: на жёлтых бейджах (15, 31, 31Э) белые цифры не читались.
+ */
+@Composable
+fun RouteNumberBadge(
+    number: String,
+    colorArgb: Long,
+    modifier: Modifier = Modifier,
+    size: Dp = 44.dp,
+    fontSize: TextUnit = 18.sp,
+    cornerRadius: Dp = 10.dp,
+    borderWidth: Dp = 2.dp
+) {
+    val shape = RoundedCornerShape(cornerRadius)
+    val textColor = Color(RouteColors.badgeTextColor(colorArgb))
+    Box(
+        modifier = modifier
+            .size(size)
+            .background(Color(colorArgb), shape)
+            .then(if (borderWidth > 0.dp) Modifier.border(borderWidth, Color(0xFF111111), shape) else Modifier),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = number,
+            color = textColor,
+            fontWeight = FontWeight.Black,
+            fontSize = fontSize,
+            maxLines = 1,
+            style = if (RouteColors.badgeNeedsShadow(colorArgb)) {
+                androidx.compose.ui.text.TextStyle(
+                    shadow = androidx.compose.ui.graphics.Shadow(color = Color.Black, blurRadius = 3f)
+                )
+            } else {
+                androidx.compose.ui.text.TextStyle.Default
+            }
+        )
+    }
+}
+
+/**
+ * Звёздочка «Избранное» с состоянием для TalkBack: озвучивается, что именно
+ * добавляется и добавлено ли оно уже.
+ */
+@Composable
+fun FavoriteToggleButton(
+    isFavorite: Boolean,
+    itemLabel: String,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    IconButton(
+        onClick = onToggle,
+        modifier = modifier.semantics {
+            stateDescription = if (isFavorite) "В избранном" else "Не в избранном"
+        }
+    ) {
+        Icon(
+            imageVector = if (isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
+            contentDescription = if (isFavorite) "Убрать $itemLabel из избранного" else "Добавить $itemLabel в избранное",
+            tint = if (isFavorite) Color(0xFFFFC107) else MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }

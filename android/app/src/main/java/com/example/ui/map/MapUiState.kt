@@ -35,11 +35,15 @@ data class JourneyMarkerUi(
 
 data class MapUiState(
     val routes: List<Route> = emptyList(),
+    /** Маршруты и расписание загружены из assets (загрузка идёт вне главного потока). */
+    val isRouteDataLoaded: Boolean = false,
     val selectedRoute: Route? = null,
     val selectedRoutePolyline: List<Point> = emptyList(),
     val isBuildingRoads: Boolean = false,
     val buses: List<Bus> = emptyList(),
     val busDataStatus: String? = null,
+    /** На карте демонстрационные автобусы, а не GPS-данные перевозчика (только debug). */
+    val busesAreDemo: Boolean = false,
     
     // Search
     val searchText: String = "",
@@ -64,6 +68,8 @@ data class MapUiState(
     val favoriteGroups: List<com.example.data.local.FavoriteGroup> = emptyList(),
     val savedJourneys: List<com.example.data.local.SavedJourney> = emptyList(),
     val arrivalsAtSelectedStop: Map<String, Int?> = emptyMap(),
+    /** Маршруты, для которых прогноз взят из живых GPS-данных; остальные — по расписанию. */
+    val liveArrivalRouteIds: Set<String> = emptySet(),
     /**
      * Маршруты, у которых ближайший подходящий автобус — низкопольный.
      * Для пассажира с коляской или тростью это решает, ехать сейчас или ждать.
@@ -98,6 +104,8 @@ data class MapUiState(
     
     // Interaction
     val highlightedStopId: String? = null,
+    /** Маршрут выбран ради фокуса на остановке — не подгонять камеру под весь маршрут. */
+    val skipRouteFitForRouteId: String? = null,
     
     // Map Settings
     val mapType: MapType = MapType.MAP,
@@ -108,6 +116,8 @@ data class MapUiState(
     val mapLoadTimedOut: Boolean = false,
     val isLocatingUser: Boolean = false,
     val locationFixTimedOut: Boolean = false,
+    /** Разовое сообщение пассажиру (snackbar), например об ошибке будильника. */
+    val userMessage: String? = null,
     
     // Weather
     val weather: WeatherUi? = null,

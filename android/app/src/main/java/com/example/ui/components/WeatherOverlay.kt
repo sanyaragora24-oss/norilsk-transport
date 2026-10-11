@@ -1,9 +1,13 @@
 package com.example.ui.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.runtime.remember
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -35,6 +39,8 @@ fun WeatherOverlay(
     errorMessage: String? = null,
     onRetry: () -> Unit = {}
 ) {
+    // «Назад» закрывает карточку, а не сворачивает приложение.
+    BackHandler(enabled = visible, onBack = onDismiss)
     AnimatedVisibility(
         visible = visible,
         enter = fadeIn(),
@@ -44,15 +50,31 @@ fun WeatherOverlay(
             modifier = Modifier
                 .fillMaxSize()
                 .background(Color.Black.copy(alpha = 0.2f))
+                // Нажатие мимо карточки закрывает её, как обычный диалог.
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClickLabel = "Закрыть погоду",
+                    onClick = onDismiss
+                )
         ) {
+            // Вызывающий код кладёт оверлей под верхнюю панель, поэтому отступ
+            // сверху небольшой; карточка непрозрачная, чтобы под ней не
+            // просвечивали плашки карты.
             Card(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
-                    .padding(top = 80.dp, start = 16.dp, end = 16.dp)
-                    .fillMaxWidth(),
+                    .padding(top = 8.dp, start = 16.dp, end = 16.dp)
+                    .fillMaxWidth()
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {}
+                    ),
                 shape = RoundedCornerShape(16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.9f)
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant
                 ),
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {

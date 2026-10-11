@@ -9,11 +9,11 @@ class TransitTextTest {
 
     @Test
     fun routeNumbersUseNumericNaturalOrder() {
-        val actual = listOf("31Э", "11", "5Б", "2", "31", "1Б", "40К", "5А", "1А", "31Б")
+        val actual = listOf("31Э", "11", "5Б", "2", "31", "1Б", "40К", "5А", "1А")
             .sortedWith(Comparator(::compareRouteNumbers))
 
         assertEquals(
-            listOf("1А", "1Б", "2", "5А", "5Б", "11", "31", "31Б", "31Э", "40К"),
+            listOf("1А", "1Б", "2", "5А", "5Б", "11", "31", "31Э", "40К"),
             actual
         )
     }

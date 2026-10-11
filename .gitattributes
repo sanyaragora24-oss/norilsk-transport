@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Bundled data assets must ship byte-identical to the committed blob on every OS
+# (APK asset hash is checked against git before a beta is published).
+android/app/src/main/assets/*.json text eol=lf

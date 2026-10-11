@@ -16,6 +16,7 @@ import com.example.data.ArrivalEstimator
 import com.example.data.Bus
 import com.example.data.RoadGeometryRepository
 import com.example.data.Route
+import com.example.data.RouteGeometryPolicy
 import com.example.data.RoutePlanner
 import com.example.data.RouteRepository
 import com.example.data.Stop
@@ -93,9 +94,16 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
             refreshNetworkAvailability()
     }
 
+    /**
+     * Маршруты и расписание разбираются на Dispatchers.IO; до окончания загрузки
+     * всё, что читает репозитории с главного потока, получает пустые данные
+     * вместо блокировки UI (см. [allStopsOrEmpty], [routesForStop]).
+     */
+    @Volatile
+    private var routeDataReady = false
+
     init {
-        loadRoutes()
-        startBusUpdates()
+        loadRouteData()
         observeSettings()
         startWeatherUpdates()
         startMapLoadingTimeout()
@@ -107,19 +115,47 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun loadRoutes() {
-        val routes = routeRepository.getRoutes()
-        val schedules = scheduleRepository.getScheduleMap()
-        _uiState.update {
-            it.copy(
-                routes = routes,
-                filteredRoutes = routes,
-                filteredStops = routeRepository.getAllStops(),
-                scheduleByRouteId = schedules,
-                scheduleDataDate = scheduleRepository.dataDate
-            )
+    private fun loadRouteData() {
+        viewModelScope.launch {
+            val data = withContext(Dispatchers.IO) {
+                RouteDataSnapshot(
+                    routes = routeRepository.getRoutes(),
+                    allStops = routeRepository.getAllStops(),
+                    schedules = scheduleRepository.getScheduleMap(),
+                    scheduleDataDate = scheduleRepository.dataDate
+                )
+            }
+            routeDataReady = true
+            _uiState.update {
+                it.copy(
+                    routes = data.routes,
+                    filteredRoutes = data.routes,
+                    filteredStops = data.allStops,
+                    scheduleByRouteId = data.schedules,
+                    scheduleDataDate = data.scheduleDataDate,
+                    isRouteDataLoaded = true
+                )
+            }
+            // Пассажир мог начать поиск или получить геопозицию до окончания загрузки.
+            filterResults()
+            _uiState.value.userLocation?.let(::updateNearbyStops)
+            // Демо-автобусы и GPS-фид опираются на маршруты — запускаем только теперь.
+            startBusUpdates()
         }
     }
+
+    private class RouteDataSnapshot(
+        val routes: List<Route>,
+        val allStops: List<Stop>,
+        val schedules: Map<String, com.example.data.RouteSchedule>,
+        val scheduleDataDate: String
+    )
+
+    private fun allStopsOrEmpty(): List<Stop> =
+        if (routeDataReady) routeRepository.getAllStops() else emptyList()
+
+    private fun routesForStop(stopId: String): List<com.example.data.RouteSummary> =
+        if (routeDataReady) routeRepository.getRoutesForStop(stopId) else emptyList()
 
     // Демо-автобусы: реальные центральные маршруты Норильска (видны сразу у стартовой камеры),
     // двигаются по геометрии маршрута, чтобы было видно движение.
@@ -176,14 +212,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                 delay(900)
                 demos.forEach { d -> advanceDemo(d) }
                 _uiState.update { it.copy(buses = demos.map { d -> d.toBus() }) }
-                _uiState.value.selectedStop?.let { stop ->
-                    _uiState.update {
-                        it.copy(
-                            arrivalsAtSelectedStop = computeArrivals(stop.id),
-                            accessibleArrivalsAtSelectedStop = computeAccessibleArrivals(stop.id)
-                        )
-                    }
-                }
+                _uiState.value.selectedStop?.let(::refreshArrivals)
             }
         }
     }
@@ -210,7 +239,12 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     private fun startBusUpdates() {
         if (BuildConfig.VEHICLE_FEED_URL.isBlank()) {
             if (BuildConfig.DEBUG) {
-                _uiState.update { it.copy(busDataStatus = "Демонстрационные автобусы") }
+                _uiState.update {
+                    it.copy(
+                        busesAreDemo = true,
+                        busDataStatus = DEMO_BUSES_STATUS
+                    )
+                }
                 startDemoBusUpdates()
             } else {
                 _uiState.update { it.copy(buses = emptyList(), busDataStatus = "GPS-данные автобусов пока недоступны") }
@@ -221,7 +255,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update { it.copy(buses = emptyList(), busDataStatus = "Источник GPS-данных должен использовать HTTPS") }
             return
         }
-        _uiState.update { it.copy(busDataStatus = null) }
+        _uiState.update { it.copy(busDataStatus = null, busesAreDemo = false) }
         busesJob?.cancel()
         busesJob = viewModelScope.launch {
             busRepository.busUpdates().collectLatest { buses ->
@@ -232,14 +266,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
                 // если открыта остановка — пересчитываем прогноз прибытия
-                _uiState.value.selectedStop?.let { stop ->
-                    _uiState.update {
-                        it.copy(
-                            arrivalsAtSelectedStop = computeArrivals(stop.id),
-                            accessibleArrivalsAtSelectedStop = computeAccessibleArrivals(stop.id)
-                        )
-                    }
-                }
+                _uiState.value.selectedStop?.let(::refreshArrivals)
             }
         }
     }
@@ -374,7 +401,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.update {
                 it.copy(
                     filteredRoutes = it.routes,
-                    filteredStops = routeRepository.getAllStops()
+                    filteredStops = allStopsOrEmpty()
                 )
             }
             return
@@ -388,7 +415,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                 _uiState.update { it.copy(filteredRoutes = filtered) }
             }
             SearchCategory.STOPS -> {
-                val allStops = routeRepository.getAllStops()
+                val allStops = allStopsOrEmpty()
                 val filtered = allStops.filter { matchesTransitSearch(query, it.name) }
                 _uiState.update { it.copy(filteredStops = filtered) }
             }
@@ -444,7 +471,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun nearestStop(point: Point): Stop? = routeRepository.getAllStops().minByOrNull { stop ->
+    private fun nearestStop(point: Point): Stop? = allStopsOrEmpty().minByOrNull { stop ->
         distanceMeters(point, stop.location)
     }
 
@@ -452,7 +479,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     private fun updateDisplayedJourneyStart(userPoint: Point) {
         val state = _uiState.value
         val boardingStopId = state.journeyBoardingStopId ?: return
-        val boardingStop = routeRepository.getAllStops().firstOrNull { it.id == boardingStopId } ?: return
+        val boardingStop = allStopsOrEmpty().firstOrNull { it.id == boardingStopId } ?: return
         val distance = distanceMeters(userPoint, boardingStop.location)
         val startSegment = JourneySegmentUi(
             points = listOf(userPoint, boardingStop.location),
@@ -527,7 +554,9 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun updateNearbyStops(userPoint: Point) {
-        val allStops = routeRepository.getAllStops()
+        // До загрузки маршрутов список пуст — не объявляем пассажира «вне города».
+        if (!routeDataReady) return
+        val allStops = allStopsOrEmpty()
         val nearby = allStops.map { stop ->
             val results = FloatArray(1)
             Location.distanceBetween(
@@ -536,7 +565,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                 results
             )
             val distance = results[0].toDouble()
-            val routes = routeRepository.getRoutesForStop(stop.id)
+            val routes = routesForStop(stop.id)
             NearbyStop(stop, distance, routes)
         }
         .sortedBy { it.distanceMeters }
@@ -591,13 +620,16 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isNetworkAvailable = available) }
     }
 
-    fun selectRoute(route: Route?) {
+    fun selectRoute(route: Route?, fitCamera: Boolean = true) {
         cancelJourneyGeometry()
         if (route == null) cancelRouteGeometry()
         _uiState.update { 
             it.copy(
                 selectedRoute = route, 
                 selectedRoutePolyline = route?.polyline ?: emptyList(),
+                skipRouteFitForRouteId = if (fitCamera) null else route?.id,
+                // Панель «Ближайшие остановки» закрывала бы полмаршрута; вернётся по «Где я».
+                isNearbyStopsCollapsed = if (route != null) true else it.isNearbyStopsCollapsed,
                 highlightedStopId = null,
                 journeySegments = emptyList(),
                 journeyMarkers = emptyList(),
@@ -605,8 +637,14 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                 isBuildingRoads = false
             ) 
         }
-        if (route != null) {
+        if (route != null && !RouteGeometryPolicy.useVerifiedAssetGeometry(route)) {
             buildRoadPolyline(route)
+        } else if (route != null) {
+            // 31/31Э contain industrial service-road sections.  The bundled
+            // geometry is verified; MapKit's public road graph has previously
+            // returned a 100+ km detour here, so do not replace it dynamically.
+            roadGeometryRepository.discardCachedPolyline(route.id)
+            Log.d("MapViewModel", "Using verified asset geometry for ${route.id}")
         }
     }
 
@@ -629,34 +667,60 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectStop(stop: Stop?) {
-        val routes = stop?.let { routeRepository.getRoutesForStop(it.id) } ?: emptyList()
-        val arrivals = if (stop != null) computeArrivals(stop.id) else emptyMap()
-        val accessible = if (stop != null) computeAccessibleArrivals(stop.id) else emptySet()
+        val routes = stop?.let { routesForStop(it.id) } ?: emptyList()
         _uiState.update {
             it.copy(
                 selectedStop = stop,
-                routesAtSelectedStop = routes,
+                routesAtSelectedStop = routes
+            )
+        }
+        if (stop != null) {
+            refreshArrivals(stop)
+        } else {
+            _uiState.update {
+                it.copy(
+                    arrivalsAtSelectedStop = emptyMap(),
+                    liveArrivalRouteIds = emptySet(),
+                    accessibleArrivalsAtSelectedStop = emptySet()
+                )
+            }
+        }
+    }
+
+    private fun refreshArrivals(stop: Stop) {
+        val (arrivals, liveIds) = computeArrivals(stop.id)
+        val accessible = computeAccessibleArrivals(stop.id)
+        _uiState.update {
+            it.copy(
                 arrivalsAtSelectedStop = arrivals,
+                liveArrivalRouteIds = liveIds,
                 accessibleArrivalsAtSelectedStop = accessible
             )
         }
     }
 
-    /** Оценка прибытия по каждому маршруту, проходящему через остановку (routeId -> минуты). */
-    private fun computeArrivals(stopId: String): Map<String, Int?> {
-        val buses = _uiState.value.buses
-        val routes = _uiState.value.routes
-        val schedules = _uiState.value.scheduleByRouteId
+    /**
+     * Оценка прибытия по каждому маршруту через остановку (routeId -> минуты)
+     * и множество маршрутов, для которых оценка взята из живых GPS-данных.
+     * Демо-автобусы — не данные: для них используется только расписание.
+     */
+    private fun computeArrivals(stopId: String): Pair<Map<String, Int?>, Set<String>> {
+        val state = _uiState.value
+        val buses = if (state.busesAreDemo) emptyList() else state.buses
+        val routes = state.routes
+        val schedules = state.scheduleByRouteId
         val result = mutableMapOf<String, Int?>()
-        routeRepository.getRoutesForStop(stopId).forEach { summary ->
+        val live = mutableSetOf<String>()
+        routesForStop(stopId).forEach { summary ->
             val route = routes.find { it.id == summary.id }
             // 1) сначала пробуем живой прогноз по GPS, 2) иначе — по расписанию (офлайн)
-            val live = route?.let { ArrivalEstimator.estimateMinutes(it, stopId, buses) }
-            result[summary.id] = live ?: route?.let {
+            val liveMinutes = route?.let { ArrivalEstimator.estimateMinutes(it, stopId, buses) }
+            if (liveMinutes != null) live += summary.id
+            result[summary.id] = liveMinutes ?: route?.let {
                 com.example.data.ScheduleEstimator.minutesUntilNext(it, schedules[summary.id], stopId)
             }
         }
-        return result
+        return result to live
     }
 
     /**
@@ -667,10 +731,12 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
      * может не быть, хуже, чем не сказать ничего.
      */
     private fun computeAccessibleArrivals(stopId: String): Set<String> {
+        // Признак низкопольности есть только в фиде перевозчика, у демо-автобусов его нет.
+        if (_uiState.value.busesAreDemo) return emptySet()
         val buses = _uiState.value.buses
         if (buses.isEmpty()) return emptySet()
         val routes = _uiState.value.routes
-        return routeRepository.getRoutesForStop(stopId)
+        return routesForStop(stopId)
             .mapNotNull { summary ->
                 val route = routes.find { it.id == summary.id } ?: return@mapNotNull null
                 val accessible = buses.any { it.routeId == route.id && it.isAccessible }
@@ -681,7 +747,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Номера маршрутов через остановку — для списка поиска. */
     fun routeNumbersForStop(stopId: String): List<String> =
-        routeRepository.getRoutesForStop(stopId)
+        routesForStop(stopId)
             .map { it.number }
             .distinct()
             .sortedWith(Comparator(::compareRouteNumbers))
@@ -706,6 +772,18 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         focusStop(stop)
     }
 
+    /**
+     * «На карту» у остановки в списке маршрута: показываем саму линию маршрута
+     * (иначе остановка видна без контекста) и фокусируемся на остановке, а не
+     * на всём маршруте.
+     */
+    fun showStopOnRoute(route: Route, stop: Stop) {
+        if (_uiState.value.selectedRoute?.id != route.id) {
+            selectRoute(route, fitCamera = false)
+        }
+        selectStopAndFocus(stop)
+    }
+
     // --- Оповещение «скоро ваша остановка» (будильник по GPS) ---
     /** Переключатель режима: только сигнал ↔ сигнал + голос. */
     fun setAlarmVoice(enabled: Boolean) {
@@ -714,7 +792,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Включить будильник на остановку: фоновый сервис разбудит при подъезде (~350 м). */
     fun armStopAlarm(stop: Stop) {
-        com.example.service.StopAlarmService.start(
+        val started = com.example.service.StopAlarmService.start(
             getApplication(),
             stop.name,
             stop.location.latitude,
@@ -723,6 +801,15 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
             _uiState.value.alarmVoice,
             stop.id
         )
+        if (!started) {
+            _uiState.update {
+                it.copy(userMessage = "Не удалось включить будильник. Проверьте доступ к точной геолокации.")
+            }
+        }
+    }
+
+    fun consumeUserMessage() {
+        _uiState.update { it.copy(userMessage = null) }
     }
 
     /** Выключить будильник. */
@@ -879,6 +966,21 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }
         val requestId = journeyPlanningRequests.next()
         journeyPlanningJob?.cancel()
+        // Новый расчёт А→Б: линия ранее открытого маршрута (например, 31) и старая
+        // поездка больше не относятся к запросу и только сбивают пассажира с толку.
+        cancelRouteGeometry()
+        cancelJourneyGeometry()
+        _uiState.update {
+            it.copy(
+                selectedRoute = null,
+                selectedRoutePolyline = emptyList(),
+                highlightedStopId = null,
+                journeySegments = emptyList(),
+                journeyMarkers = emptyList(),
+                journeyBoardingStopId = null,
+                isBuildingRoads = false
+            )
+        }
         journeyPlanningJob = viewModelScope.launch {
             _uiState.update { it.copy(isPlanning = true, plannerError = null, plannerJourney = null, plannerVariants = emptyList()) }
             try {
@@ -1059,7 +1161,9 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
                     journeySegments = segments,
                     journeyMarkers = markers,
                     journeyBoardingStopId = firstBoardStop?.id,
-                    isBuildingRoads = false
+                    isBuildingRoads = false,
+                    // как и для маршрута: панель «Ближайшие остановки» закрыла бы поездку
+                    isNearbyStopsCollapsed = true
                 )
             }
             journeyGeometryRequests.ensureCurrent(requestId)
@@ -1319,6 +1423,7 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
     private companion object {
         const val MAP_LOAD_TIMEOUT_MS = 12_000L
         const val LOCATION_FIX_TIMEOUT_MS = 10_000L
+        const val DEMO_BUSES_STATUS = "Демо-режим: значки автобусов условные, это не реальные GPS-данные"
     }
 
 }
