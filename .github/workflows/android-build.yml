@@ -181,6 +181,32 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # Компактный APK для телефонов (только ARM/ARM64), тем же ключом.
+      # Собирается в отдельную папку, чтобы не перепутать с полным APK выше.
+      - name: Build compact phone release APK
+        working-directory: android
+        env:
+          KEYSTORE_PATH: ${{ secrets.UPLOAD_KEYSTORE_PATH || 'my-upload-key.jks' }}
+          KEYSTORE_ALIAS: ${{ secrets.UPLOAD_KEYSTORE_ALIAS || '' }}
+          STORE_PASSWORD: ${{ secrets.UPLOAD_STORE_PASSWORD || '' }}
+          KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD || '' }}
+        run: |
+          ./gradlew :app:assembleRelease -PphoneAbisOnly=true --no-daemon
+          mkdir -p phone-apk
+          cp app/build/outputs/apk/release/*.apk phone-apk/
+          ls -la phone-apk/
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)"
+          "${BT}apksigner" verify --print-certs phone-apk/*.apk || echo "::warning::Phone APK is not signed (no release keystore secrets)."
+          sha256sum phone-apk/*.apk
+
+      - name: Upload phone APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: norilsk-transit-phone-apk-${{ github.sha }}
+          path: android/phone-apk/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
       # Without the release keystore secrets the release APK above is unsigned and
       # cannot be installed. The debug APK is signed with the runner's debug key,
       # so testers can install it directly (uninstall a release build first).

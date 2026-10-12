@@ -288,7 +288,11 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }.launchIn(viewModelScope)
 
         settingsRepository.mapType.onEach { type ->
-            _uiState.update { it.copy(mapType = type) }
+            _uiState.update { it.copy(mapType = TrafficPolicy.effectiveMapType(type)) }
+        }.launchIn(viewModelScope)
+
+        settingsRepository.trafficVisible.onEach { visible ->
+            if (visible != _uiState.value.isTrafficVisible) applyTrafficVisible(visible)
         }.launchIn(viewModelScope)
 
         favoritesRepository.favoriteStopIds.onEach { ids ->
@@ -1326,8 +1330,64 @@ class MapViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private var trafficTimeoutJob: kotlinx.coroutines.Job? = null
+
     fun toggleTraffic() {
-        _uiState.update { it.copy(isTrafficVisible = !it.isTrafficVisible) }
+        val visible = !_uiState.value.isTrafficVisible
+        applyTrafficVisible(visible)
+        viewModelScope.launch { settingsRepository.setTrafficVisible(visible) }
+    }
+
+    private fun applyTrafficVisible(visible: Boolean) {
+        _uiState.update {
+            it.copy(
+                isTrafficVisible = visible,
+                trafficSdkState = if (visible) TrafficPolicy.SdkState.LOADING else TrafficPolicy.SdkState.IDLE,
+                trafficLevel = null,
+                trafficLevelColor = null,
+                trafficTimedOut = false
+            )
+        }
+        armTrafficTimeout()
+    }
+
+    /** Если MapKit не ответил вовремя — показать честный статус «нет данных». */
+    private fun armTrafficTimeout() {
+        trafficTimeoutJob?.cancel()
+        if (!_uiState.value.isTrafficVisible) return
+        trafficTimeoutJob = viewModelScope.launch {
+            kotlinx.coroutines.delay(TrafficPolicy.NO_DATA_TIMEOUT_MS)
+            _uiState.update {
+                if (it.isTrafficVisible && it.trafficSdkState != TrafficPolicy.SdkState.READY) {
+                    it.copy(trafficTimedOut = true)
+                } else it
+            }
+        }
+    }
+
+    /** MapKit начал загрузку данных о пробках (TrafficListener.onTrafficLoading). */
+    fun onTrafficLoading() {
+        _uiState.update { it.copy(trafficSdkState = TrafficPolicy.SdkState.LOADING) }
+        if (!_uiState.value.trafficTimedOut) armTrafficTimeout()
+    }
+
+    /** Данные пришли (TrafficListener.onTrafficChanged); [level] null — балла для города нет. */
+    fun onTrafficChanged(level: Int?, color: TrafficPolicy.LevelColor?) {
+        trafficTimeoutJob?.cancel()
+        _uiState.update {
+            it.copy(
+                trafficSdkState = TrafficPolicy.SdkState.READY,
+                trafficLevel = level,
+                trafficLevelColor = color,
+                trafficTimedOut = false
+            )
+        }
+    }
+
+    /** Данные устарели (TrafficListener.onTrafficExpired): MapKit сам их перезапросит. */
+    fun onTrafficExpired() {
+        _uiState.update { it.copy(trafficSdkState = TrafficPolicy.SdkState.EXPIRED) }
+        armTrafficTimeout()
     }
 
     fun toggleBuses() {

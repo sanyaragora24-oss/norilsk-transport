@@ -23,6 +23,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -80,6 +81,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.lang.ref.WeakReference
+import com.yandex.mapkit.traffic.TrafficColor
+import com.yandex.mapkit.traffic.TrafficLevel
+import com.yandex.mapkit.traffic.TrafficListener
 import com.example.R
 import com.example.BuildConfig
 import com.example.data.Route
@@ -462,10 +466,13 @@ fun MapScreen(
                 onMapLoaded = { viewModel.onMapLoaded() },
                 onCameraMoved = { viewModel.onCameraMoved(it) },
                 isSheetOpen = showRoutesSheet,
-                hasTopStatus = uiState.busDataStatus != null,
+                hasTopStatus = uiState.busDataStatus != null || uiState.isTrafficVisible,
                 hasLocationPermission = hasLocationPermission,
                 nightMode = isDarkUi,
-                commands = viewModel.mapCommands
+                commands = viewModel.mapCommands,
+                onTrafficLoading = { viewModel.onTrafficLoading() },
+                onTrafficChanged = { level, color -> viewModel.onTrafficChanged(level, color) },
+                onTrafficExpired = { viewModel.onTrafficExpired() }
             )
 
             when (MapInteractionPolicy.surfaceStatus(
@@ -537,6 +544,18 @@ fun MapScreen(
 
                 uiState.busDataStatus?.let { status ->
                     BusDataStatusChip(status = status, isDemo = uiState.busesAreDemo)
+                }
+
+                val trafficStatus = TrafficPolicy.status(
+                    enabled = uiState.isTrafficVisible,
+                    networkAvailable = uiState.isNetworkAvailable,
+                    sdkState = uiState.trafficSdkState,
+                    level = uiState.trafficLevel,
+                    levelColor = uiState.trafficLevelColor,
+                    timedOut = uiState.trafficTimedOut
+                )
+                trafficStatus.message?.let { message ->
+                    TrafficStatusChip(status = trafficStatus, message = message, onTurnOff = { viewModel.toggleTraffic() })
                 }
 
                 // Привязка поездки А→Б к дорогам идёт через сеть и может занять
@@ -768,14 +787,24 @@ fun MapScreen(
                     Icon(Icons.Default.Remove, contentDescription = "Отдалить")
                 }
 
+                // Переключатель «Пробки»: подпись под значком и заметно другой фон,
+                // когда слой включён, — раньше это был безымянный значок светофора.
                 FloatingActionButton(
                     onClick = { viewModel.toggleTraffic() },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = if (uiState.isTrafficVisible) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground,
+                    containerColor = if (uiState.isTrafficVisible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                    contentColor = if (uiState.isTrafficVisible) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier
+                        .size(width = 56.dp, height = 52.dp)
+                        .semantics {
+                            contentDescription = if (uiState.isTrafficVisible) "Пробки: включены. Нажмите, чтобы выключить"
+                            else "Пробки: выключены. Нажмите, чтобы включить"
+                        }
                 ) {
-                    Icon(Icons.Default.Traffic, contentDescription = "Пробки")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Traffic, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Text("Пробки", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
                 }
                 
                 FloatingActionButton(
@@ -1229,6 +1258,50 @@ private fun BusDataStatusChip(status: String, isDemo: Boolean) {
     }
 }
 
+/**
+ * Состояние слоя пробок над картой. Если Яндекс не прислал данные, здесь так и
+ * написано — цвет дорог приложение никогда не дорисовывает само.
+ */
+@Composable
+private fun TrafficStatusChip(status: TrafficPolicy.Status, message: String, onTurnOff: () -> Unit) {
+    val dot = when (status.levelColor) {
+        TrafficPolicy.LevelColor.GREEN -> Color(0xFF3BB54A)
+        TrafficPolicy.LevelColor.YELLOW -> Color(0xFFFFC107)
+        TrafficPolicy.LevelColor.RED -> Color(0xFFE53935)
+        null -> null
+    }
+    val problem = status.kind == TrafficPolicy.Kind.NO_NETWORK || status.kind == TrafficPolicy.Kind.NO_DATA
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (problem) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        contentColor = if (problem) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface,
+        shadowElevation = 4.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            when {
+                status.kind == TrafficPolicy.Kind.LOADING || status.kind == TrafficPolicy.Kind.EXPIRED ->
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                dot != null -> Box(Modifier.size(14.dp).background(dot, CircleShape))
+                else -> Icon(Icons.Default.Traffic, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            IconButton(onClick = onTurnOff, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Выключить пробки", modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
 private fun Modifier.rotate(degrees: Float): Modifier = this.then(
     Modifier.graphicsLayer(rotationZ = degrees)
 )
@@ -1360,7 +1433,10 @@ fun YandexMapView(
     hasTopStatus: Boolean = false,
     hasLocationPermission: Boolean = false,
     nightMode: Boolean,
-    commands: kotlinx.coroutines.flow.SharedFlow<MapCommand>
+    commands: kotlinx.coroutines.flow.SharedFlow<MapCommand>,
+    onTrafficLoading: () -> Unit = {},
+    onTrafficChanged: (Int?, TrafficPolicy.LevelColor?) -> Unit = { _, _ -> },
+    onTrafficExpired: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1382,6 +1458,34 @@ fun YandexMapView(
     val trafficLayer = remember {
         MapKitFactory.getInstance().createTrafficLayer(mapView.mapWindow).apply {
             isTrafficVisible = uiState.isTrafficVisible
+        }
+    }
+    val currentOnTrafficLoading by rememberUpdatedState(onTrafficLoading)
+    val currentOnTrafficChanged by rememberUpdatedState(onTrafficChanged)
+    val currentOnTrafficExpired by rememberUpdatedState(onTrafficExpired)
+    // MapKit держит слушателя только по слабой ссылке: сильная ссылка — здесь.
+    // Без слушателя приложение не знало, пришли ли данные, и не могло сказать
+    // пассажиру, почему дороги не окрашены.
+    val trafficListener = remember(trafficLayer) {
+        object : TrafficListener {
+            override fun onTrafficChanged(trafficLevel: TrafficLevel?) {
+                val color = when (trafficLevel?.color) {
+                    TrafficColor.GREEN -> TrafficPolicy.LevelColor.GREEN
+                    TrafficColor.YELLOW -> TrafficPolicy.LevelColor.YELLOW
+                    TrafficColor.RED -> TrafficPolicy.LevelColor.RED
+                    null -> null
+                }
+                currentOnTrafficChanged(trafficLevel?.level, color)
+            }
+            override fun onTrafficLoading() = currentOnTrafficLoading()
+            override fun onTrafficExpired() = currentOnTrafficExpired()
+        }
+    }
+    DisposableEffect(trafficLayer, trafficListener) {
+        val ref = WeakReference<TrafficListener>(trafficListener)
+        trafficLayer.addTrafficListener(ref)
+        onDispose {
+            if (trafficLayer.isValid) trafficLayer.removeTrafficListener(ref)
         }
     }
 
@@ -1495,7 +1599,11 @@ fun YandexMapView(
         }
     }
 
-    LaunchedEffect(uiState.isTrafficVisible) { trafficLayer.isTrafficVisible = uiState.isTrafficVisible }
+    // Слой включается и после возврата карты на экран (новый MapView создаёт
+    // новый слой), поэтому ключ — и состояние, и сам слой.
+    LaunchedEffect(trafficLayer, uiState.isTrafficVisible) {
+        if (trafficLayer.isValid) trafficLayer.isTrafficVisible = uiState.isTrafficVisible
+    }
     // Ночной режим карты вслед за тёмной темой приложения
     LaunchedEffect(nightMode) { mapView.mapWindow.map.setNightModeEnabled(nightMode) }
     
@@ -1591,18 +1699,23 @@ fun YandexMapView(
     )
 
     // Selective updates of map objects
-    LaunchedEffect(uiState.selectedRoutePolyline, uiState.selectedRoute?.color) {
+    LaunchedEffect(uiState.selectedRoutePolyline, uiState.selectedRoute?.color, uiState.isTrafficVisible) {
         routeCollection.clear()
         if (uiState.selectedRoutePolyline.isNotEmpty() && uiState.selectedRoute != null) {
             val geometry = Polyline(uiState.selectedRoutePolyline)
-            routeCollection.addPolyline(geometry).apply {
-                setStrokeColor(0xFF000000.toInt())
-                strokeWidth = 8f
-                zIndex = 1f
+            // Линия маршрута лежит над слоем пробок: при включённых пробках она
+            // тоньше и полупрозрачная, чтобы не закрывать цвет улицы.
+            val stroke = TrafficPolicy.routeStroke(uiState.isTrafficVisible)
+            if (stroke.outlineWidth > 0f) {
+                routeCollection.addPolyline(geometry).apply {
+                    setStrokeColor(stroke.outlineColor)
+                    strokeWidth = stroke.outlineWidth
+                    zIndex = 1f
+                }
             }
             routeCollection.addPolyline(geometry).apply {
-                setStrokeColor(uiState.selectedRoute!!.color.toInt())
-                strokeWidth = 4f
+                setStrokeColor(TrafficPolicy.withAlpha(uiState.selectedRoute!!.color.toInt(), stroke.lineAlpha))
+                strokeWidth = stroke.lineWidth
                 zIndex = 2f
             }
         }
@@ -1610,8 +1723,9 @@ fun YandexMapView(
 
     // Маршрут А→Б на карте: автобусы цветом маршрута, пешком — серым,
     // точки Посадка / Пересадка / Выход подписаны прямо на карте.
-    LaunchedEffect(uiState.journeySegments, uiState.journeyMarkers) {
+    LaunchedEffect(uiState.journeySegments, uiState.journeyMarkers, uiState.isTrafficVisible) {
         journeyCollection.clear()
+        val journeyStroke = TrafficPolicy.routeStroke(uiState.isTrafficVisible, journey = true)
         uiState.journeySegments.forEach { seg ->
             if (seg.points.size >= 2) {
                 val pl = Polyline(seg.points)
@@ -1627,15 +1741,17 @@ fun YandexMapView(
                         } catch (_: Throwable) { /* старый MapKit без пунктира — оставим сплошную */ }
                     }
                 } else {
-                    // тёмная окантовка + цвет маршрута
-                    journeyCollection.addPolyline(pl).apply {
-                        setStrokeColor(0xFF000000.toInt())
-                        strokeWidth = 9f
-                        zIndex = 5f
+                    // тёмная окантовка + цвет маршрута (при пробках — без окантовки, полупрозрачно)
+                    if (journeyStroke.outlineWidth > 0f) {
+                        journeyCollection.addPolyline(pl).apply {
+                            setStrokeColor(journeyStroke.outlineColor)
+                            strokeWidth = journeyStroke.outlineWidth
+                            zIndex = 5f
+                        }
                     }
                     journeyCollection.addPolyline(pl).apply {
-                        setStrokeColor(seg.color.toInt())
-                        strokeWidth = 5f
+                        setStrokeColor(TrafficPolicy.withAlpha(seg.color.toInt(), journeyStroke.lineAlpha))
+                        strokeWidth = journeyStroke.lineWidth
                         zIndex = 6f
                     }
                 }

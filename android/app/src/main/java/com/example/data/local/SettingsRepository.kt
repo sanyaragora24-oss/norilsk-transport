@@ -1,6 +1,7 @@
 package com.example.data.local
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -16,6 +17,16 @@ class SettingsRepository(context: Context) {
 
     private val themeKey = stringPreferencesKey("app_theme")
     private val mapTypeKey = intPreferencesKey("map_type")
+    private val trafficVisibleKey = booleanPreferencesKey("traffic_visible")
+
+    /** Слой пробок: выбор пассажира переживает перезапуск приложения. */
+    val trafficVisible: Flow<Boolean> = store.safeData().map { preferences ->
+        preferences[trafficVisibleKey] ?: false
+    }
+
+    suspend fun setTrafficVisible(visible: Boolean) {
+        store.edit { it[trafficVisibleKey] = visible }
+    }
 
     val appTheme: Flow<AppTheme> = store.safeData().map { preferences ->
         val themeName = preferences[themeKey] ?: AppTheme.SYSTEM.name

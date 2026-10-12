@@ -66,6 +66,13 @@ android {
     buildConfigField("String", "VEHICLE_FEED_URL", vehicleFeedUrl.asBuildConfigString())
     
     manifestPlaceholders["YANDEX_MAPKIT_API_KEY"] = yandexApiKey
+
+    // -PphoneAbisOnly=true — компактный APK для телефонов: только ARM/ARM64.
+    // Код и ключ подписи те же, убраны лишь нативные библиотеки x86/x86_64
+    // (MapKit — ~70 МБ из ~150). Обычная сборка по-прежнему со всеми ABI.
+    if (providers.gradleProperty("phoneAbisOnly").orNull == "true") {
+      ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
+    }
   }
 
   signingConfigs {
