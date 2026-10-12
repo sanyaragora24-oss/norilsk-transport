@@ -82,6 +82,15 @@ data class MapUiState(
     
     // Layer Visibility
     val isTrafficVisible: Boolean = false,
+    /** Последнее событие TrafficListener MapKit. */
+    val trafficSdkState: TrafficPolicy.SdkState = TrafficPolicy.SdkState.IDLE,
+    /** Балл пробок Яндекса (null — для города балл не рассчитывается). */
+    val trafficLevel: Int? = null,
+    val trafficLevelColor: TrafficPolicy.LevelColor? = null,
+    /** Слой включён, но MapKit так и не прислал данные за отведённое время. */
+    val trafficTimedOut: Boolean = false,
+    /** Сервер Яндекса ответил 403 на запрос слоя пробок (видно только в журнале MapKit). */
+    val trafficAccessDenied: Boolean = false,
     val areBusesVisible: Boolean = true,
     val areStopsVisible: Boolean = true,
 
@@ -108,7 +117,7 @@ data class MapUiState(
     val skipRouteFitForRouteId: String? = null,
     
     // Map Settings
-    val mapType: MapType = MapType.MAP,
+    val mapType: MapType = MapType.VECTOR_MAP,
     val appTheme: AppTheme = AppTheme.SYSTEM,
     val cameraZoom: Float = 11.0f,
     val isMapLoaded: Boolean = false,

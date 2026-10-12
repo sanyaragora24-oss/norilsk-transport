@@ -66,6 +66,14 @@ android {
     buildConfigField("String", "VEHICLE_FEED_URL", vehicleFeedUrl.asBuildConfigString())
     
     manifestPlaceholders["YANDEX_MAPKIT_API_KEY"] = yandexApiKey
+
+    // -PphoneAbisOnly=true — компактный APK для современных телефонов: только
+    // arm64-v8a (Redmi Note 10 Pro и практически все смартфоны с 2019 г.).
+    // Код и ключ подписи те же, убраны лишь нативные библиотеки armeabi-v7a,
+    // x86 и x86_64. Обычная сборка по-прежнему со всеми ABI.
+    if (providers.gradleProperty("phoneAbisOnly").orNull == "true") {
+      ndk { abiFilters += listOf("arm64-v8a") }
+    }
   }
 
   signingConfigs {
