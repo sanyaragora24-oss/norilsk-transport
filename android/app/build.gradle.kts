@@ -67,11 +67,12 @@ android {
     
     manifestPlaceholders["YANDEX_MAPKIT_API_KEY"] = yandexApiKey
 
-    // -PphoneAbisOnly=true — компактный APK для телефонов: только ARM/ARM64.
-    // Код и ключ подписи те же, убраны лишь нативные библиотеки x86/x86_64
-    // (MapKit — ~70 МБ из ~150). Обычная сборка по-прежнему со всеми ABI.
+    // -PphoneAbisOnly=true — компактный APK для современных телефонов: только
+    // arm64-v8a (Redmi Note 10 Pro и практически все смартфоны с 2019 г.).
+    // Код и ключ подписи те же, убраны лишь нативные библиотеки armeabi-v7a,
+    // x86 и x86_64. Обычная сборка по-прежнему со всеми ABI.
     if (providers.gradleProperty("phoneAbisOnly").orNull == "true") {
-      ndk { abiFilters += listOf("armeabi-v7a", "arm64-v8a") }
+      ndk { abiFilters += listOf("arm64-v8a") }
     }
   }
 
