@@ -78,17 +78,61 @@ class Route31DirectionGeometryTest {
     }
 
     @Test
-    fun every31VariantReversesOnlyAtTheAbkYuzhnyDeadEnd() {
-        // Единственный разворот в любом варианте 31 — тупиковый заезд на АБК
-        // Южный. Лишние «туда-обратно» к старой точке РМЦ-2 на трассе убраны.
+    fun every31VariantTurnsAtAbkYuzhnyOnTheRingNotByReversing() {
+        // У АБК Южный автобус проходит кольцо в одну сторону: вверх по восточной
+        // стороне, вокруг верха, вниз по западной. Раньше вместо кольца был
+        // «туда-обратно» с прямым срезом к отметке остановки в 16 м от дороги —
+        // на телефоне это выглядело зигзагом.
+        val ring = listOf(ABK_S2, ABK_TOP1, ABK_TOP2, ABK_STOP, ABK_WEST, ABK_SW)
         (0..5).map { "2246:$it" }.forEach { id ->
-            val r = route(id)
-            val turns = uTurns(r.points("polyline"))
-            val abk = r.points("stops")[r.getValue("stops").jsonArray.indexOfFirst {
-                it.jsonObject.str("name") == "АБК Южный"
-            }]
-            assertEquals("$id: only the ABK Yuzhny spur may reverse, got $turns", 1, turns.size)
-            assertTrue("$id: the reversal must be at АБК Южный", meters(turns.single(), abk) < 5.0)
+            val line = route(id).points("polyline")
+            assertEquals("$id: no 180° reversals anywhere", emptyList<Pair<Double, Double>>(), uTurns(line))
+            val order = ring.map { v -> line.indexOfFirst { meters(it, v) < 3.0 } }
+            assertTrue("$id: line must pass every ring vertex, got $order", order.all { it >= 0 })
+            assertEquals("$id: ring is driven east side first, then round the top and down the west", order.sorted(), order)
+            val abk = stopsOf(id).single { it.str("name") == "АБК Южный" }.at()
+            assertTrue("$id: АБК Южный at the 2GIS platform", meters(abk, 69.321637 to 87.963362) < 5.0)
+            assertTrue("$id: АБК Южный on the line", line.minOf { meters(it, abk) } < 1.0)
+            assertTrue("$id: no cut to the old off-road marker", line.all { meters(it, 69.3215728 to 87.9627228) > 15.0 })
+        }
+    }
+
+    @Test
+    fun abkZoneFollowsTheConfirmedRoadWithoutStraightCuts() {
+        // Всё, что линия рисует севернее трассы у РМЦ-2/АБК, должно лежать на
+        // дороге: развилка → прямой отросток → кольцо → обратно к развилке.
+        // Любой новый «срез» по прямой между остановками уйдёт с этой дороги.
+        val road = listOf(ABK_JUNCTION, ABK_S1, ABK_S2, ABK_TOP1, ABK_TOP2, ABK_STOP, ABK_WEST, ABK_SW, ABK_BACK, ABK_JUNCTION)
+        (0..5).map { "2246:$it" }.forEach { id ->
+            val line = route(id).points("polyline")
+            val zone = line.withIndex().filter { (_, p) -> p.first > 69.3179 && p.second in 87.960..87.9725 }
+            assertTrue("$id: line enters the ABK zone", zone.size >= road.size - 1)
+            zone.forEach { (i, p) ->
+                assertTrue("$id pt $i is ${distanceToLine(p, road).toInt()} m off the road", distanceToLine(p, road) < 6.0)
+            }
+            // каждый отрезок в зоне тоже лежит на дороге (проверяем его середину)
+            zone.zipWithNext().filter { (a, b) -> b.index == a.index + 1 }.forEach { (a, b) ->
+                val mid = (a.value.first + b.value.first) / 2 to (a.value.second + b.value.second) / 2
+                assertTrue("$id segment ${a.index} cuts off the road", distanceToLine(mid, road) < 6.0)
+            }
+        }
+    }
+
+    @Test
+    fun inbound31DrivesTheTsbkKrugRoundTheBlock() {
+        // Обратные варианты проходят «ЦБК круг» (схема МУП): верхней стороной на
+        // запад, западной на юг, нижней на восток. 2ГИС и Яндекс совпадают; раньше
+        // линия срезала круг напрямую на северо-восток (до 43 м мимо дороги).
+        val krug = listOf(69.32856 to 87.97928, 69.32853 to 87.97867, 69.32841 to 87.97842,
+            69.32822 to 87.97846, 69.3281 to 87.97886, 69.32812 to 87.97938)
+        listOf("2246:1", "2246:3", "2246:5").forEach { id ->
+            val line = route(id).points("polyline")
+            val order = krug.map { v -> line.indexOfFirst { meters(it, v) < 3.0 } }
+            assertTrue("$id: line must drive the whole krug, got $order", order.all { it >= 0 })
+            assertEquals("$id: krug direction", order.sorted(), order)
+            val tsbk = stopsOf(id).single { it.str("name") == "ЦБК" }.at()
+            assertTrue("$id: ЦБК at the platform on the west side", meters(tsbk, 69.328173 to 87.978559) < 12.0)
+            assertTrue("$id: ЦБК on the line", line.minOf { meters(it, tsbk) } < 1.0)
         }
     }
 
@@ -124,7 +168,7 @@ class Route31DirectionGeometryTest {
             assertTrue("$id: РМЦ-2 must be at the 2GIS platform", meters(rmc2, 69.319531 to 87.968543) < 15.0)
             assertTrue("$id: РМЦ-2 must lie on the line", line.minOf { meters(it, rmc2) } < 2.0)
             // прямой отросток от развилки к АБК, без дуги ~80 м восточнее
-            assertTrue("$id: spur must follow the straight road", line.minOf { meters(it, 69.32067 to 87.96566) } < 5.0)
+            assertTrue("$id: spur must follow the straight road", line.minOf { meters(it, ABK_S1) } < 5.0)
             assertTrue("$id: the old bent spur is gone", line.all { meters(it, 69.32008 to 87.969166) > 30.0 })
         }
     }
@@ -222,4 +266,26 @@ class Route31DirectionGeometryTest {
         return hypot(pa.first - pb.first, pa.second - pb.second)
     }
 
+    /** Расстояние (м) от точки до ломаной [line]. */
+    private fun distanceToLine(p: Pair<Double, Double>, line: List<Pair<Double, Double>>): Double =
+        line.zipWithNext().minOf { (a, b) ->
+            val (px, py) = xy(p); val (ax, ay) = xy(a); val (bx, by) = xy(b)
+            val dx = bx - ax; val dy = by - ay
+            val t = (((px - ax) * dx + (py - ay) * dy) / (dx * dx + dy * dy)).coerceIn(0.0, 1.0)
+            hypot(px - ax - t * dx, py - ay - t * dy)
+        }
+
+    private companion object {
+        // Дорога к АБК Южный: вершины 2ГИС (все 8 направлений 31 одинаковы),
+        // Яндекс Карты совпадают в пределах 11 м.
+        val ABK_JUNCTION = 69.317783 to 87.972973   // развилка с трассой
+        val ABK_S1 = 69.32067 to 87.96566
+        val ABK_S2 = 69.32167 to 87.96434
+        val ABK_TOP1 = 69.32176 to 87.96408
+        val ABK_TOP2 = 69.32174 to 87.9637
+        val ABK_STOP = 69.3216383 to 87.963359      // платформа 2ГИС 805330 на дороге
+        val ABK_WEST = 69.32157 to 87.96313
+        val ABK_SW = 69.32144 to 87.96314
+        val ABK_BACK = 69.32065 to 87.96558
+    }
 }
