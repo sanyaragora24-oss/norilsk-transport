@@ -170,6 +170,13 @@ fun MapScreen(
     val routesListState = rememberSaveable(saver = LazyListState.Saver) {
         LazyListState()
     }
+    // Новый запрос или вкладка — новый список: показываем его с начала. Иначе
+    // сохранялась прокрутка прошлого списка, и по запросу «31» первыми были
+    // видны 31Э, а шесть направлений обычного 31 оставались выше экрана.
+    // Возврат из карточки маршрута запрос не меняет и позицию не сбрасывает.
+    LaunchedEffect(uiState.searchText, uiState.searchCategory) {
+        routesListState.scrollToItem(0)
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
