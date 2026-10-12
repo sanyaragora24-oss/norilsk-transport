@@ -89,6 +89,8 @@ data class MapUiState(
     val trafficLevelColor: TrafficPolicy.LevelColor? = null,
     /** Слой включён, но MapKit так и не прислал данные за отведённое время. */
     val trafficTimedOut: Boolean = false,
+    /** Сервер Яндекса ответил 403 на запрос слоя пробок (видно только в журнале MapKit). */
+    val trafficAccessDenied: Boolean = false,
     val areBusesVisible: Boolean = true,
     val areStopsVisible: Boolean = true,
 

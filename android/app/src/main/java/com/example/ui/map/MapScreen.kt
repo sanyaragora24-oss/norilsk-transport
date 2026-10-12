@@ -552,7 +552,8 @@ fun MapScreen(
                     sdkState = uiState.trafficSdkState,
                     level = uiState.trafficLevel,
                     levelColor = uiState.trafficLevelColor,
-                    timedOut = uiState.trafficTimedOut
+                    timedOut = uiState.trafficTimedOut,
+                    accessDenied = uiState.trafficAccessDenied
                 )
                 trafficStatus.message?.let { message ->
                     TrafficStatusChip(status = trafficStatus, message = message, onTurnOff = { viewModel.toggleTraffic() })
@@ -1270,7 +1271,8 @@ private fun TrafficStatusChip(status: TrafficPolicy.Status, message: String, onT
         TrafficPolicy.LevelColor.RED -> Color(0xFFE53935)
         null -> null
     }
-    val problem = status.kind == TrafficPolicy.Kind.NO_NETWORK || status.kind == TrafficPolicy.Kind.NO_DATA
+    val problem = status.kind == TrafficPolicy.Kind.NO_NETWORK || status.kind == TrafficPolicy.Kind.NO_DATA ||
+        status.kind == TrafficPolicy.Kind.ACCESS_DENIED
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = if (problem) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
@@ -1284,7 +1286,7 @@ private fun TrafficStatusChip(status: TrafficPolicy.Status, message: String, onT
             when {
                 status.kind == TrafficPolicy.Kind.LOADING || status.kind == TrafficPolicy.Kind.EXPIRED ->
                     CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
-                dot != null -> Box(Modifier.size(14.dp).background(dot, CircleShape))
+                !problem && dot != null -> Box(Modifier.size(14.dp).background(dot, CircleShape))
                 else -> Icon(Icons.Default.Traffic, contentDescription = null, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(8.dp))

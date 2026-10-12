@@ -11,15 +11,16 @@ import com.yandex.mapkit.map.MapType
 object TrafficPolicy {
 
     /**
-     * Тип подложки, на которой реально рисуется карта.
+     * Тип подложки, на которой рисуется карта.
      *
-     * Приложение раньше принудительно ставило [MapType.MAP] — устаревшую растровую
-     * подложку вместо векторной, которую MapKit 4.x использует по умолчанию. Слой
-     * пробок MapKit 4.x векторный (`jams_multizoom`), его порядок задаётся среди
-     * слоёв векторной карты, и ночной режим тоже работает только на ней.
-     * Переключателя типа карты в интерфейсе нет, а «Спутник» и «Гибрид» по условиям
-     * MapKit разрешены только приложениям Яндекса, так что любое сохранённое ранее
-     * значение сводится к векторной схеме.
+     * Раньше приложение принудительно ставило [MapType.MAP] — устаревшую растровую
+     * подложку вместо векторной, которую MapKit 4.x использует по умолчанию.
+     * На ней не работает ночной режим (`setNightModeEnabled`), а слой пробок MapKit
+     * 4.x — векторный (`vtrf`). Причиной отсутствия цвета это не было (на эмуляторе
+     * запрос слоя пробок получал 403 при обеих подложках), но векторная схема —
+     * штатный режим SDK. Переключателя типа карты в интерфейсе нет, а «Спутник»
+     * и «Гибрид» по условиям MapKit разрешены только приложениям Яндекса, поэтому
+     * любое сохранённое ранее значение сводится к векторной схеме.
      */
     fun effectiveMapType(@Suppress("UNUSED_PARAMETER") stored: MapType?): MapType = MapType.VECTOR_MAP
 
@@ -32,7 +33,7 @@ object TrafficPolicy {
     /** Цвет общего балла пробок по данным Яндекса. */
     enum class LevelColor { GREEN, YELLOW, RED }
 
-    enum class Kind { OFF, NO_NETWORK, LOADING, NO_DATA, READY_WITH_LEVEL, READY_WITHOUT_LEVEL, EXPIRED }
+    enum class Kind { OFF, NO_NETWORK, ACCESS_DENIED, LOADING, NO_DATA, READY_WITH_LEVEL, READY_WITHOUT_LEVEL, EXPIRED }
 
     data class Status(
         val kind: Kind,
@@ -44,11 +45,13 @@ object TrafficPolicy {
             get() = when (kind) {
                 Kind.OFF -> null
                 Kind.NO_NETWORK -> "Пробки недоступны: нет интернета"
+                Kind.ACCESS_DENIED ->
+                    "Яндекс отказал в доступе к слою пробок (ошибка 403). Цвет дорог не показан"
                 Kind.LOADING -> "Пробки: загружаем данные Яндекса…"
                 Kind.NO_DATA -> "Яндекс не прислал данные о пробках. Цвет дорог не показан"
-                Kind.READY_WITH_LEVEL -> "Пробки: ${level ?: 0} ${pointsWord(level ?: 0)}"
+                Kind.READY_WITH_LEVEL -> "Пробки: ${level ?: 0} ${pointsWord(level ?: 0)} по данным Яндекса"
                 Kind.READY_WITHOUT_LEVEL ->
-                    "Пробки включены: цвет на дорогах там, где у Яндекса есть данные. Общего балла для Норильска нет"
+                    "Слой пробок Яндекса включён. Общего балла пробок для Норильска Яндекс не даёт"
                 Kind.EXPIRED -> "Данные о пробках устарели, обновляем…"
             }
     }
@@ -63,15 +66,35 @@ object TrafficPolicy {
         sdkState: SdkState,
         level: Int?,
         levelColor: LevelColor?,
-        timedOut: Boolean
+        timedOut: Boolean,
+        accessDenied: Boolean = false
     ): Status = when {
         !enabled -> Status(Kind.OFF)
         !networkAvailable -> Status(Kind.NO_NETWORK)
+        // Сервер отклонил векторный слой пробок: балл может приходить, а цвета на
+        // дорогах не будет — об этом нужно сказать прямо, а не показывать «N баллов».
+        accessDenied -> Status(Kind.ACCESS_DENIED, level, levelColor)
         sdkState == SdkState.READY && level != null -> Status(Kind.READY_WITH_LEVEL, level, levelColor)
         sdkState == SdkState.READY -> Status(Kind.READY_WITHOUT_LEVEL)
         sdkState == SdkState.EXPIRED -> Status(Kind.EXPIRED)
         timedOut -> Status(Kind.NO_DATA)
         else -> Status(Kind.LOADING)
+    }
+
+    /**
+     * MapKit не сообщает через API, что сервер отказал в слое пробок: балл
+     * (TrafficListener) приходит из другого сервиса, а запрос векторного слоя
+     * `vtrf` получает HTTP 403 и пишет об этом только в logcat (тег yandex.maps).
+     * По этим строкам приложение и узнаёт, почему дороги не окрашены.
+     */
+    fun isTrafficLayerForbidden(logLines: List<String>): Boolean {
+        for ((i, line) in logLines.withIndex()) {
+            if (!line.contains("Could not update layer") || !line.contains("/vtrf")) continue
+            // Тело ответа nginx MapKit печатает отдельными строками прямо перед этой.
+            val from = (i - 12).coerceAtLeast(0)
+            if ((from..i).any { j -> logLines[j].contains("403") || logLines[j].contains("Forbidden") }) return true
+        }
+        return false
     }
 
     /** «1 балл», «2 балла», «5 баллов», «11 баллов». */
