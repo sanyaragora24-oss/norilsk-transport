@@ -3,6 +3,8 @@ package com.example.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -183,7 +185,11 @@ fun FavoritesSheet(
                             val inGroup = selectedGroup?.routeIds?.contains(route.id) == true
                             val active = if (selectedGroup == null) isFav else inGroup
                             ListItem(
-                                modifier = Modifier.clickable {
+                                // Строка — переключатель: TalkBack должен озвучить, отмечен ли маршрут.
+                                modifier = Modifier.toggleable(
+                                    value = active,
+                                    role = Role.Checkbox
+                                ) {
                                     if (selectedGroup == null) {
                                         onToggleFavoriteRoute(route.id)
                                     } else {
@@ -194,7 +200,7 @@ fun FavoritesSheet(
                                 },
                                 leadingContent = { RouteBadge(route) },
                                 headlineContent = { Text(route.origin) },
-                                supportingContent = { Text("→ ${route.destination}", maxLines = 1) },
+                                supportingContent = { Text("→\u00A0${route.destination}", maxLines = 1) },
                                 trailingContent = {
                                     Icon(
                                         imageVector = if (active) Icons.Filled.Star else Icons.Outlined.StarBorder,
@@ -233,7 +239,7 @@ fun FavoritesSheet(
                                     modifier = Modifier.clickable { onSelectRoute(route) },
                                     leadingContent = { RouteBadge(route) },
                                     headlineContent = { Text(route.origin) },
-                                    supportingContent = { Text("→ ${route.destination}", maxLines = 1) },
+                                    supportingContent = { Text("→\u00A0${route.destination}", maxLines = 1) },
                                     trailingContent = {
                                         FavItemMenu(
                                             groups = groups,
@@ -295,26 +301,7 @@ fun FavoritesSheet(
 
 @Composable
 private fun RouteBadge(route: Route) {
-    Box(
-        modifier = Modifier
-            .size(44.dp)
-            .background(Color(route.color.toInt()), RoundedCornerShape(10.dp))
-            .border(2.dp, Color(0xFF111111), RoundedCornerShape(10.dp)),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = route.number,
-            color = Color.White,
-            fontWeight = FontWeight.Black,
-            fontSize = 18.sp,
-            style = androidx.compose.ui.text.TextStyle(
-                shadow = androidx.compose.ui.graphics.Shadow(
-                    color = Color.Black,
-                    blurRadius = 2f
-                )
-            )
-        )
-    }
+    RouteNumberBadge(number = route.number, colorArgb = route.color)
 }
 
 @Composable

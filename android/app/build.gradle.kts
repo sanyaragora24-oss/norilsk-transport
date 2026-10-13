@@ -16,11 +16,18 @@ plugins {
 val localProperties = Properties()
 val localPropertiesFile = rootProject.file("local.properties")
 if (localPropertiesFile.exists()) {
-  FileInputStream(localPropertiesFile).use { localProperties.load(it) }
+  // UTF-8 reader: Properties.load(InputStream) decodes ISO-8859-1 and turns a
+  // UTF-8 BOM into "ï»¿", which no longer matches the BOM stripped below.
+  FileInputStream(localPropertiesFile).reader(Charsets.UTF_8).use { localProperties.load(it) }
 }
 
+// Values pasted into GitHub Secrets from a text file can carry a UTF-8 BOM or a
+// trailing newline; MapKit then rejects the key ("Invalid api key") and the map
+// never loads in CI builds. Strip both before the value reaches BuildConfig.
 fun configuredProperty(name: String): String =
-  providers.gradleProperty(name).orNull ?: localProperties.getProperty(name) ?: ""
+  (providers.gradleProperty(name).orNull ?: localProperties.getProperty(name) ?: "")
+    .removePrefix("\uFEFF")
+    .trim()
 
 fun String.asBuildConfigString(): String =
   "\"" + replace("\\", "\\\\").replace("\"", "\\\"") + "\""
@@ -49,7 +56,7 @@ android {
     applicationId = "ru.norilsk.transit"
     minSdk = 26
     targetSdk = 36
-    versionCode = 12
+    versionCode = 14
     versionName = "1.2.10"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -59,6 +66,14 @@ android {
     buildConfigField("String", "VEHICLE_FEED_URL", vehicleFeedUrl.asBuildConfigString())
     
     manifestPlaceholders["YANDEX_MAPKIT_API_KEY"] = yandexApiKey
+
+    // -PphoneAbisOnly=true — компактный APK для современных телефонов: только
+    // arm64-v8a (Redmi Note 10 Pro и практически все смартфоны с 2019 г.).
+    // Код и ключ подписи те же, убраны лишь нативные библиотеки armeabi-v7a,
+    // x86 и x86_64. Обычная сборка по-прежнему со всеми ABI.
+    if (providers.gradleProperty("phoneAbisOnly").orNull == "true") {
+      ndk { abiFilters += listOf("arm64-v8a") }
+    }
   }
 
   signingConfigs {
