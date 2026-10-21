@@ -21,7 +21,6 @@ settings:
     CURRENT_PROJECT_VERSION: "8"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""  # Заполнить Apple Developer ID (10-символьный)
-    ENABLE_BITCODE: YES
 
 targets:
   NorilskTransit:
@@ -40,7 +39,6 @@ targets:
         CFBundleShortVersionString: "1.2.6"
         CFBundleVersion: "8"
         UILaunchStoryboardName: LaunchScreen
-        UIRequiredDeviceCapabilities: [armv7]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIUserInterfaceStyle: Dark
         NSLocationWhenInUseUsageDescription: "Нужен для отображения ближайших остановок и работы будильника у выбранной остановки"
