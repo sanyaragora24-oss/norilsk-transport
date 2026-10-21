@@ -113,10 +113,11 @@ jobs:
             -scheme NorilskTransit \
             -configuration Debug \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
             -quiet \
-            build 2>&1 | tee build.log | tail -100
-          echo "=== Build status: $? ==="
+            build > build.log 2>&1 || { tail -100 build.log; exit 1; }
+          tail -40 build.log
 
       - name: Verify .app bundle
         working-directory: iosApp
