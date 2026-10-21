@@ -15,7 +15,7 @@ name: iOS Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, ios-ci-route31-readiness]
     paths:
       - 'iosApp/**'
       - '.github/workflows/ios-build.yml'
