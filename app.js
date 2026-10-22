@@ -17,6 +17,16 @@
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* без сохранения */ } }
   };
   let favs = store.get(FAV_KEY, { routes: [], stops: [] });
+  const SET_KEY = "nt.settings.v1";
+  const settings = Object.assign({ theme: "system", alerts: true, voice: true }, store.get(SET_KEY, {}));
+  const saveSettings = () => store.set(SET_KEY, settings);
+  function applyTheme() {
+    const r = document.documentElement;
+    if (settings.theme === "system") r.removeAttribute("data-theme"); else r.setAttribute("data-theme", settings.theme);
+  }
+  applyTheme();
+  let weather = null, weatherErr = null, weatherAlerts = [];
+  const dismissed = new Set();
   const isFavRoute = (n) => favs.routes.includes(n);
   const isFavStop = (k) => favs.stops.includes(k);
   function toggleFav(kind, key) {
@@ -136,7 +146,7 @@
   let state = { tab: "routes", dayWeekend: null };
   function parseHash() {
     const p = new URLSearchParams(location.hash.slice(1));
-    return { r: p.get("r"), s: p.get("s"), tab: p.get("tab") };
+    return { r: p.get("r"), s: p.get("s"), tab: p.get("tab"), w: p.get("w"), m: p.get("m") };
   }
   function go(o) {
     const p = new URLSearchParams();
@@ -276,6 +286,11 @@
     if (!s) return go({});
     const now = nowNorilsk();
     let html = `<div class="head"><button class="back" data-back aria-label="Назад">‹</button><div class="grow"><h2>${esc(s.name)}</h2><div class="sub">Остановка · ${s.numbers.length} ${plural(s.numbers.length, "маршрут", "маршрута", "маршрутов")}</div></div><button class="fav" data-fav-stop="${s.key}" aria-pressed="${isFavStop(s.key)}" aria-label="В избранное">${isFavStop(s.key) ? "★" : "☆"}</button></div>`;
+    const al = window.NTAlarm.state;
+    html += al && al.key === s.key
+      ? `<button class="big-btn off" data-alarm-stop>🔕 Выключить будильник</button>`
+      : `<button class="big-btn" data-alarm-start="${s.key}">🔔 Разбудить у этой остановки</button>`;
+    html += `<p class="note">Сигнал за ${window.NTAlarm.APPROACH_M} м и при подъезде. На iPhone работает, пока приложение открыто: экран не гаснет сам, телефон можно держать в кармане экраном к себе. Звук — не в беззвучном режиме.</p>`;
     const visits = s.visits.slice().sort((a, b) => cmpNum(a.r.n, b.r.n));
     html += `<ul class="list">${visits.map(({ r, i }) => {
       let meta = "Нет официального расписания";
@@ -293,8 +308,52 @@
     drawStop(s);
   }
 
+  function fmtT(t) { if (t == null) return "—"; const v = Math.round(t); return (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(v) + "°"; }
+
+  function viewWeather() {
+    let html = `<div class="head"><button class="back" data-back aria-label="Назад">‹</button><div class="grow"><h2>Погода в Норильске</h2><div class="sub">${weather ? "Обновлено " + new Date(weather.fetchedAt).toLocaleTimeString("ru-RU", { timeZone: TZ, hour: "2-digit", minute: "2-digit" }) + (weather.stale ? " · нет сети, старые данные" : "") : ""}</div></div><button class="fav" data-wx-refresh aria-label="Обновить">↻</button></div>`;
+    if (!weather) {
+      html += `<div class="empty">${weatherErr ? "Не удалось получить погоду. Проверьте интернет и нажмите ↻." : "Загружаем погоду…"}</div>`;
+      body.innerHTML = html; return;
+    }
+    const w = weather;
+    html += `<div class="wxbig"><span class="i">${w.icon}</span><span class="t">${fmtT(w.temp)}</span><span><b>${esc(w.description)}</b><div class="sub">Ощущается как ${fmtT(w.feelsLike)}</div></span></div>`;
+    html += `<div class="kv"><div>Ветер<b>${w.wind != null ? Math.round(w.wind) + " м/с" : "—"}</b></div><div>Порывы<b>${w.gusts != null ? Math.round(w.gusts) + " м/с" : "—"}</b></div><div>Видимость<b>${w.visibility != null ? (w.visibility >= 10000 ? "более 10 км" : (w.visibility / 1000).toFixed(1).replace(".", ",") + " км") : "—"}</b></div><div>Ощущается<b>${fmtT(w.feelsLike)}</b></div></div>`;
+    if (weatherAlerts.length) {
+      html += `<div class="section">Предупреждения</div>`;
+      weatherAlerts.forEach((a) => { html += `<div class="card s${a.level === "SEVERE" ? 2 : a.level === "WARNING" ? 1 : 0}"><b>${esc(a.title)}</b>${esc(a.message)}<p>${esc(a.advice)}</p></div>`; });
+    }
+    const rc = window.NTWeather.roadConditions(w);
+    html += `<div class="section">Дорожные условия</div><div class="card s${rc.severity}"><b>${esc(rc.title)}</b><ul>${rc.factors.map((f) => `<li>${esc(f)}</li>`).join("")}</ul><p>${esc(rc.recommendation)}</p></div>`;
+    if (w.hourly.length) {
+      html += `<div class="section">Ближайшие часы</div><div class="hours">${w.hourly.slice(0, 12).map((h) => `<div>${esc(h.time)}<b>${fmtT(h.temp)}</b>${window.NTWeather.codeIcon(h.code)}<br>${h.wind != null ? Math.round(h.wind) + " м/с" : ""}</div>`).join("")}</div>`;
+    }
+    html += `<p class="note">Данные Open-Meteo, как в Android-приложении. Предупреждения рассчитываются по порогам Росгидромета, адаптированным под Норильск; официальные решения штаба «Шторм» смотрите в городских источниках.</p>`;
+    body.innerHTML = html;
+  }
+
+  function viewMenu() {
+    const al = window.NTAlarm.state;
+    const th = (v, l) => `<button data-theme-set="${v}" aria-pressed="${settings.theme === v}">${l}</button>`;
+    const standalone = window.navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+    let html = `<div class="head"><button class="back" data-back aria-label="Назад">‹</button><div class="grow"><h2>Норильский транспорт</h2><div class="sub">Веб-версия · сборка ${esc(window.BUILD)}</div></div></div>`;
+    html += `<div class="section">Тема оформления</div><div class="seg">${th("system", "Как в системе")}${th("light", "Светлая")}${th("dark", "Тёмная")}</div>`;
+    html += `<ul class="list menu">`;
+    html += `<li><label class="row"><span class="ic">⛈️</span><span class="grow"><div class="title">Оповещения о непогоде</div><div class="meta">Пурга, мороз, гололёд, сильный ветер — плашкой над картой</div></span><input type="checkbox" class="switch" data-set="alerts" ${settings.alerts ? "checked" : ""}></label></li>`;
+    html += `<li><label class="row"><span class="ic">🗣️</span><span class="grow"><div class="title">Голос будильника</div><div class="meta">«Скоро ваша остановка…» вслух вместе со звуком</div></span><input type="checkbox" class="switch" data-set="voice" ${settings.voice ? "checked" : ""}></label></li>`;
+    html += `<li><button class="row" data-sound-test><span class="ic">🔔</span><span class="grow"><div class="title">Проверить звук будильника</div><div class="meta">${al ? "Будильник включён: " + esc(al.name) : "Будильник ставится на экране остановки"}</div></span></button></li>`;
+    html += `<li><button class="row" data-goto-weather><span class="ic">🌡️</span><span class="grow"><div class="title">Погода и дорожные условия</div></span></button></li>`;
+    html += `<li><a class="row" href="mailto:sanyaragora24@gmail.com?subject=${encodeURIComponent("Норильский транспорт (iPhone, веб) — отзыв")}&body=${encodeURIComponent("\n\n---\nСборка: " + window.BUILD + "\nРасписание от: " + (DATA ? DATA.dataDate : "") + "\nУстройство: " + navigator.userAgent + "\nНа экране «Домой»: " + (standalone ? "да" : "нет"))}" style="color:inherit;text-decoration:none"><span class="ic">✉️</span><span class="grow"><div class="title">Поддержка</div><div class="meta">Сообщить об ошибке разработчику</div></span></a></li>`;
+    html += `</ul>`;
+    if (!standalone) html += `<div class="card"><b>Установить на iPhone</b><ol class="steps"><li>Откройте эту страницу в Safari</li><li>Нажмите «Поделиться» (квадрат со стрелкой)</li><li>«На экран „Домой“» → «Добавить»</li></ol></div>`;
+    html += `<div class="section">О приложении</div><p class="note">Карта общественного транспорта Норильска, Талнаха и Кайеркана. Маршруты и расписание НПОПАТ от ${esc(DATA ? DATA.dataDate : "")} — те же данные, что в Android-версии. Карта © участники OpenStreetMap, погода — Open-Meteo. Живых GPS-данных автобусов пока нет.</p>`;
+    body.innerHTML = html;
+  }
+
   function render() {
     const h = parseHash();
+    if (h.w) { viewWeather(); body.scrollTop = 0; return; }
+    if (h.m) { viewMenu(); body.scrollTop = 0; return; }
     if (h.tab) state.tab = h.tab;
     if (h.r) { const [id, i] = h.r.split("@"); viewRoute(id, i != null ? +i : null); }
     else if (h.s) viewStop(h.s);
@@ -312,7 +371,61 @@
     else if (t.dataset.day) { state.dayWeekend = t.dataset.day === "we"; render(); }
     else if (t.dataset.favRoute) { const on = toggleFav("routes", t.dataset.favRoute); toast(on ? "Маршрут добавлен в избранное" : "Убран из избранного"); render(); }
     else if (t.dataset.favStop) { const on = toggleFav("stops", t.dataset.favStop); toast(on ? "Остановка добавлена в избранное" : "Убрана из избранного"); render(); }
+    else if (t.dataset.alarmStart) {
+      const st = STOP_BY_KEY[t.dataset.alarmStart];
+      window.NTAlarm.start(st, { voice: settings.voice }).then(() => toast(`Будильник: «${st.name}». Не закрывайте приложение.`, 5000));
+      render();
+    }
+    else if (t.hasAttribute("data-alarm-stop")) { window.NTAlarm.stop(); toast("Будильник выключен"); render(); }
+    else if (t.hasAttribute("data-sound-test")) { window.NTAlarm.test(); }
+    else if (t.hasAttribute("data-goto-weather")) { go({ w: 1 }); }
+    else if (t.hasAttribute("data-wx-refresh")) { refreshWeather(true); }
+    else if (t.dataset.themeSet) { settings.theme = t.dataset.themeSet; saveSettings(); applyTheme(); render(); }
     else if (t.hasAttribute("data-back")) { if (history.length > 1) history.back(); else go({}); }
+  });
+
+  body.addEventListener("change", (e) => {
+    const k = e.target.dataset && e.target.dataset.set;
+    if (!k) return;
+    settings[k] = e.target.checked; saveSettings();
+    if (k === "voice" && window.NTAlarm.state) window.NTAlarm.state.voice = settings.voice;
+    renderBanners();
+  });
+  $("#menu").onclick = () => go({ m: 1 });
+  $("#clock").onclick = () => go({ w: 1 });
+
+  // ---------- погода и плашки ----------
+  async function refreshWeather(force) {
+    try {
+      weather = await window.NTWeather.load(force); weatherErr = null;
+      weatherAlerts = window.NTWeather.evaluateAlerts(weather);
+    } catch (e) { weatherErr = e; }
+    tick(); renderBanners();
+    if (parseHash().w) viewWeather();
+  }
+  function renderBanners() {
+    const a = settings.alerts ? weatherAlerts.find((x) => x.level !== "ADVISORY" && !dismissed.has(x.id)) : null;
+    const el = $("#alert");
+    if (a) {
+      el.hidden = false; el.className = "alertbar" + (a.level === "SEVERE" ? " severe" : "");
+      el.innerHTML = `<span style="font-size:22px">⚠️</span><span class="grow"><b>${esc(a.title)}</b>${esc(a.message)}</span><button data-dismiss="${a.id}" aria-label="Закрыть предупреждение">✕</button>`;
+      el.querySelector("button").onclick = () => { dismissed.add(a.id); renderBanners(); };
+      el.onclick = (e) => { if (!e.target.closest("button")) go({ w: 1 }); };
+    } else el.hidden = true;
+
+    const al = window.NTAlarm.state, bar = $("#alarmbar");
+    if (al) {
+      bar.hidden = false;
+      bar.className = "alarmbar" + (al.arrival ? " arrived" : al.approach ? " near" : "");
+      const d = al.distance == null ? (al.error || "ждём GPS…") : al.distance < 1000 ? `${al.distance} м` : `${(al.distance / 1000).toFixed(1).replace(".", ",")} км`;
+      const head = al.arrival ? "Выходите!" : al.approach ? "Скоро ваша остановка" : "Будильник включён";
+      bar.innerHTML = `<span style="font-size:22px">${al.arrival ? "🚏" : "🔔"}</span><span class="grow"><b>${head}</b>${esc(al.name)} · ${d}${al.accuracy > 100 ? " (GPS неточный)" : ""}</span><button aria-label="Выключить будильник">${al.arrival ? "Готово" : "Выкл."}</button>`;
+      bar.querySelector("button").onclick = () => { window.NTAlarm.stop(); renderBanners(); if (parseHash().s) render(); };
+      bar.onclick = (e) => { if (!e.target.closest("button")) go({ s: al.key }); };
+    } else bar.hidden = true;
+  }
+  window.NTAlarm.onChange(() => {
+    renderBanners();
   });
 
   const q = $("#q");
@@ -343,7 +456,9 @@
 
   function tick() {
     const n = nowNorilsk();
-    $("#clock").innerHTML = `${n.hhmm}<small>Норильск</small>`;
+    $("#clock").innerHTML = weather
+      ? `<span class="wxline">${weather.icon}&nbsp;${fmtT(weather.temp)}</span><small>${n.hhmm}</small>`
+      : `${n.hhmm}<small>Норильск</small>`;
   }
   tick(); setInterval(() => { const before = $("#clock").textContent; tick(); if ($("#clock").textContent !== before && (parseHash().r || parseHash().s)) render(); }, 15000);
 
@@ -351,9 +466,15 @@
   body.innerHTML = `<div class="empty">Загружаем маршруты…</div>`;
   fetch("data.json").then((r) => { if (!r.ok) throw new Error(r.status); return r.json(); }).then((d) => {
     DATA = d; index(); render();
+    window.NTAlarm.restore();
   }).catch(() => {
     body.innerHTML = `<div class="empty">Не удалось загрузить маршруты. Проверьте интернет и обновите страницу.</div>`;
   });
+
+  refreshWeather(false);
+  setInterval(() => refreshWeather(false), 10 * 60 * 1000);
+  setInterval(() => { if (!weather) refreshWeather(false); }, 30 * 1000);
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") refreshWeather(false); });
 
   if ("serviceWorker" in navigator && location.protocol === "https:") {
     navigator.serviceWorker.register("sw.js").catch(() => {});
