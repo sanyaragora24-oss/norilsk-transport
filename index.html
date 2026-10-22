@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Норильский транспорт</title>
+<meta name="description" content="Автобусы Норильска: маршруты, остановки и расписание.">
+<meta name="theme-color" content="#0b1630">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Транспорт">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="vendor/leaflet.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div id="map" aria-label="Карта Норильска"></div>
+
+<header class="topbar">
+  <div class="search">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 0 1 5.6 11.2l4.6 4.6-1.4 1.4-4.6-4.6A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg>
+    <input id="q" type="search" placeholder="Маршрут или остановка" autocomplete="off" enterkeyhint="search" aria-label="Поиск маршрута или остановки">
+    <button id="qclear" class="icon-btn" hidden aria-label="Очистить">×</button>
+  </div>
+  <div class="clock" id="clock" title="Время в Норильске"></div>
+</header>
+
+<div class="fabs">
+  <button id="locate" class="fab" aria-label="Где я">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm9 3h-2.06A7 7 0 0 0 13 5.06V3h-2v2.06A7 7 0 0 0 5.06 11H3v2h2.06A7 7 0 0 0 11 18.94V21h2v-2.06A7 7 0 0 0 18.94 13H21v-2zm-9 6a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
+  </button>
+</div>
+
+<section id="sheet" class="sheet" aria-live="polite">
+  <button class="grip" id="grip" aria-label="Развернуть или свернуть панель"><span></span></button>
+  <div id="sheet-body"></div>
+</section>
+
+<div id="toast" class="toast" role="status" hidden></div>
+
+<script>window.BUILD = "5ec7557dd4";</script>
+<script src="vendor/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
