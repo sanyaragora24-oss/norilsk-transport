@@ -7,7 +7,7 @@ target 'NorilskTransit' do
   use_frameworks!
 
   # Яндекс MapKit iOS SDK
-  pod 'YandexMapsMobile', '~> 4.5'
+  pod 'YandexMapsMobile'
 
   # Firebase (Crashlytics, Messaging, Analytics)
   pod 'Firebase/Crashlytics'
