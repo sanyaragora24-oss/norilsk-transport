@@ -20,13 +20,20 @@
 <div id="map" aria-label="Карта Норильска"></div>
 
 <header class="topbar">
+  <button id="menu" class="square" aria-label="Меню">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+  </button>
   <div class="search">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 0 1 5.6 11.2l4.6 4.6-1.4 1.4-4.6-4.6A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg>
     <input id="q" type="search" placeholder="Маршрут или остановка" autocomplete="off" enterkeyhint="search" aria-label="Поиск маршрута или остановки">
     <button id="qclear" class="icon-btn" hidden aria-label="Очистить">×</button>
   </div>
-  <div class="clock" id="clock" title="Время в Норильске"></div>
+  <button class="clock" id="clock" aria-label="Погода и время в Норильске"></button>
 </header>
+<div class="banners">
+  <div id="alarmbar" class="alarmbar" hidden></div>
+  <div id="alert" class="alertbar" hidden></div>
+</div>
 
 <div class="fabs">
   <button id="locate" class="fab" aria-label="Где я">
@@ -43,6 +50,8 @@
 
 <script>window.BUILD = "__BUILD__";</script>
 <script src="vendor/leaflet.js"></script>
+<script src="weather.js"></script>
+<script src="alarm.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

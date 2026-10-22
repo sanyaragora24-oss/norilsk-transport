@@ -4,7 +4,7 @@ const VERSION = "__BUILD__";
 const APP_CACHE = "nt-app-" + VERSION;
 const TILE_CACHE = "nt-tiles-v1";
 const APP_FILES = [
-  "./", "index.html", "app.css", "app.js", "data.json", "manifest.webmanifest",
+  "./", "index.html", "app.css", "app.js", "weather.js", "alarm.js", "data.json", "manifest.webmanifest",
   "vendor/leaflet.css", "vendor/leaflet.js",
   "vendor/images/marker-icon.png", "vendor/images/marker-shadow.png",
   "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png"
@@ -62,4 +62,12 @@ self.addEventListener("fetch", (e) => {
         .catch(() => caches.match(req, { ignoreSearch: true }).then((r) => r || caches.match("index.html")))
     );
   }
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+    for (const c of list) if ("focus" in c) return c.focus();
+    return self.clients.openWindow("./");
+  }));
 });

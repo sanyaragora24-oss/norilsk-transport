@@ -18,7 +18,7 @@ WEB = ROOT / "web"
 ASSETS = ROOT / "android" / "app" / "src" / "main" / "assets"
 DIST = WEB / "dist"
 
-STATIC = ["index.html", "app.css", "app.js", "manifest.webmanifest", "sw.js"]
+STATIC = ["index.html", "app.css", "app.js", "weather.js", "alarm.js", "manifest.webmanifest", "sw.js"]
 STATIC_DIRS = ["vendor", "icons"]
 
 
