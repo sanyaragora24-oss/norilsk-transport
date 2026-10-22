@@ -102,6 +102,9 @@ jobs:
           print(f'schedule: {len(s[\"routes\"])}')
           assert len(r['routes']) > 50, 'routes count too low'
           assert len(s['routes']) > 50, 'schedule count too low'
+          route31 = [x for x in r['routes'] if str(x.get('number', '')).strip() == '31']
+          assert route31, 'route 31 missing'
+          print(f'route 31 directions: {len(route31)}')
           print('OK')
           "
 
