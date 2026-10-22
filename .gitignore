@@ -38,3 +38,5 @@ norilsk-transport/
 
 # --- Logs ---
 *.log
+web/dist/
+
