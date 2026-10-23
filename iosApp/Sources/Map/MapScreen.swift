@@ -63,7 +63,7 @@ struct YandexMapView: UIViewRepresentable {
         // Инициализатор в разных версиях SDK то nullable, то нет — так компилируется в обоих случаях.
         let created: YMKMapView? = YMKMapView(frame: .zero)
         guard let mapView = created else { fatalError("YMKMapView init failed") }
-        context.coordinator.mapObjects = mapView.mapWindow.map.mapObjects.addCollection()
+        context.coordinator.mapObjects = mapView.mapWindow.map.mapObjects.add()
         // Move to Norilsk
         let norilsk = YMKPoint(latitude: 69.34, longitude: 88.21)
         mapView.mapWindow.map.move(with: YMKCameraPosition(target: norilsk, zoom: 11, azimuth: 0, tilt: 0))
@@ -79,7 +79,7 @@ struct YandexMapView: UIViewRepresentable {
         for route in routes {
             let polyline = YMKPolyline(points: route.stops.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) })
             let polylineObj = mapObjects.addPolyline(with: polyline)
-            polylineObj.strokeColor = UIColor(route.colorArgb)
+            polylineObj.setStrokeColorWith(UIColor(route.colorArgb))
             polylineObj.strokeWidth = 4
             polylineObj.isVisible = (selectedRoute == nil || selectedRoute?.id == route.id) ? true : false
         }
@@ -88,7 +88,7 @@ struct YandexMapView: UIViewRepresentable {
         if let route = selectedRoute {
             let polyline = YMKPolyline(points: route.polyline.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) })
             let polylineObj = mapObjects.addPolyline(with: polyline)
-            polylineObj.strokeColor = UIColor(route.colorArgb)
+            polylineObj.setStrokeColorWith(UIColor(route.colorArgb))
             polylineObj.strokeWidth = 6
             polylineObj.isVisible = true
         }
