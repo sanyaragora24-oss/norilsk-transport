@@ -32,12 +32,14 @@ concurrency:
 jobs:
   build:
     name: Build iOS app (Xcode ${{ matrix.xcode }}, iOS ${{ matrix.ios }})
-    runs-on: macos-14  # Apple Silicon, быстрее
+    # macos-15: на macos-14 по умолчанию Xcode 15.4, а свежие xcodegen и
+    # CocoaPods пишут проекты в формате Xcode 16 (77), который 15.4 не открывает.
+    runs-on: macos-15  # Apple Silicon
 
     strategy:
       fail-fast: false
       matrix:
-        xcode: ['16.0']
+        xcode: ['16']
         ios: ['17.0']
 
     env:
@@ -47,6 +49,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Select Xcode ${{ matrix.xcode }}
+        run: |
+          XC=$(ls -d /Applications/Xcode_${{ matrix.xcode }}*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then
+            echo "::error::Xcode ${{ matrix.xcode }}.x not found on this runner"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          sudo xcode-select -s "$XC/Contents/Developer"
+          echo "Selected $XC"
 
       - name: Show toolchain versions
         run: |
