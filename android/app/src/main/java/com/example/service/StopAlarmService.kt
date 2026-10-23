@@ -1,5 +1,6 @@
 package com.example.service
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
@@ -8,6 +9,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.location.Location
 import android.os.Build
@@ -16,9 +18,11 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
+import android.util.Log
 import java.util.Locale
 import java.util.ArrayDeque
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.example.R
 import com.example.data.local.StopAlarmNotifier
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -82,25 +86,34 @@ class StopAlarmService : Service() {
             stopTracking()
             return START_NOT_STICKY
         }
+        stopName = intent?.getStringExtra(EXTRA_STOP_NAME)?.take(120) ?: "Остановка"
+        // A service started with startForegroundService() must call
+        // startForeground() before it may stop itself: stopping first crashes the
+        // process on Android 8+ ("did not then call Service.startForeground").
+        // So publish the notification before any validation or early exit, and
+        // before binding to a potentially slow TextToSpeech engine.
+        try {
+            startForegroundCompat()
+        } catch (e: RuntimeException) {
+            // SecurityException (location permission revoked, Android 14+) or
+            // ForegroundServiceStartNotAllowedException. StopAlarmService.start()
+            // checks both before starting, so this is a narrow race window.
+            Log.w(TAG, "Cannot enter foreground; stop alarm not started", e)
+            stopTracking()
+            return START_NOT_STICKY
+        }
         if (intent == null || !intent.hasExtra(EXTRA_LAT) || !intent.hasExtra(EXTRA_LON)) {
             stopTracking()
             return START_NOT_STICKY
         }
-        stopName = intent.getStringExtra(EXTRA_STOP_NAME)?.take(120) ?: "Остановка"
         targetLat = intent.getDoubleExtra(EXTRA_LAT, Double.NaN)
         targetLon = intent.getDoubleExtra(EXTRA_LON, Double.NaN)
-        if (!targetLat.isFinite() || !targetLon.isFinite() ||
-            targetLat !in -90.0..90.0 || targetLon !in -180.0..180.0
-        ) {
-            stopTracking()
-            return START_NOT_STICKY
-        }
         radius = intent.getDoubleExtra(EXTRA_RADIUS, 350.0)
-        if (!radius.isFinite() || radius !in 100.0..2_000.0) {
+        if (!StopAlarmRequest.isValid(targetLat, targetLon, radius)) {
             stopTracking()
             return START_NOT_STICKY
         }
-        voice = intent?.getBooleanExtra(EXTRA_VOICE, false) ?: false
+        voice = intent.getBooleanExtra(EXTRA_VOICE, false)
         // Re-arming the alarm must fully retire the preceding location callback
         // and any queued speech before a new tracking session becomes current.
         trackingGeneration++
@@ -109,15 +122,6 @@ class StopAlarmService : Service() {
         try { tts?.stop() } catch (_: Exception) {}
         proximityTracker = StopAlarmProximityTracker(approachRadiusMeters = radius)
         passageDetector = StopAlarmPassageDetector(targetLat, targetLon)
-        // Android gives a newly started foreground service only a few seconds to
-        // publish its notification. Do that before binding to a potentially slow
-        // TextToSpeech engine.
-        try {
-            startForegroundCompat()
-        } catch (_: SecurityException) {
-            stopTracking()
-            return START_NOT_STICKY
-        }
         activeAlarmStop.value = intent.getStringExtra(EXTRA_STOP_ID)
         if (voice) ensureTtsInitialized()
         scheduleTrackingTimeout(trackingGeneration)
@@ -317,7 +321,13 @@ class StopAlarmService : Service() {
         private const val ONGOING_CHANNEL = "stop_alarm_ongoing_channel"
         private const val MAX_TRACKING_DURATION_MS = 4 * 60 * 60 * 1000L
         private const val DEFAULT_UNREPORTED_ACCURACY_METERS = 100f
+        private const val TAG = "StopAlarmService"
 
+        /**
+         * Запускает будильник. Возвращает false, если запуск невозможен
+         * (неверные координаты, нет точной геолокации, система запретила
+         * foreground-сервис) — тогда сервис не стартует и не может упасть.
+         */
         fun start(
             context: Context,
             stopName: String,
@@ -326,7 +336,12 @@ class StopAlarmService : Service() {
             radius: Double,
             voice: Boolean = false,
             stopId: String? = null
-        ) {
+        ): Boolean {
+            if (!StopAlarmRequest.isValid(lat, lon, radius)) return false
+            val hasFineLocation = ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!hasFineLocation) return false
             val intent = Intent(context, StopAlarmService::class.java).apply {
                 putExtra(EXTRA_STOP_NAME, stopName)
                 putExtra(EXTRA_LAT, lat)
@@ -335,10 +350,17 @@ class StopAlarmService : Service() {
                 putExtra(EXTRA_VOICE, voice)
                 putExtra(EXTRA_STOP_ID, stopId)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            return try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+                true
+            } catch (e: RuntimeException) {
+                // ForegroundServiceStartNotAllowedException (IllegalStateException) / SecurityException
+                Log.w(TAG, "Stop alarm service start refused", e)
+                false
             }
         }
 

@@ -23,6 +23,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -66,6 +67,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -75,6 +81,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.viewmodel.compose.viewModel
 import java.lang.ref.WeakReference
+import com.yandex.mapkit.traffic.TrafficColor
+import com.yandex.mapkit.traffic.TrafficLevel
+import com.yandex.mapkit.traffic.TrafficListener
 import com.example.R
 import com.example.BuildConfig
 import com.example.data.Route
@@ -85,6 +94,8 @@ import com.example.data.local.AppTheme
 import com.example.data.network.WeatherAlertLevel
 import com.example.ui.components.*
 import com.yandex.mapkit.MapKitFactory
+import com.yandex.mapkit.ScreenPoint
+import com.yandex.mapkit.ScreenRect
 import com.yandex.mapkit.geometry.Geometry
 import com.yandex.mapkit.geometry.Point
 import com.yandex.mapkit.geometry.Polyline
@@ -158,6 +169,13 @@ fun MapScreen(
 
     val routesListState = rememberSaveable(saver = LazyListState.Saver) {
         LazyListState()
+    }
+    // Новый запрос или вкладка — новый список: показываем его с начала. Иначе
+    // сохранялась прокрутка прошлого списка, и по запросу «31» первыми были
+    // видны 31Э, а шесть направлений обычного 31 оставались выше экрана.
+    // Возврат из карточки маршрута запрос не меняет и позицию не сбрасывает.
+    LaunchedEffect(uiState.searchText, uiState.searchCategory) {
+        routesListState.scrollToItem(0)
     }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -338,13 +356,22 @@ fun MapScreen(
         }
     }
 
+    LaunchedEffect(uiState.userMessage) {
+        uiState.userMessage?.let { message ->
+            viewModel.consumeUserMessage()
+            snackbarHostState.showSnackbar(message = message, duration = SnackbarDuration.Long)
+        }
+    }
+
     LaunchedEffect(uiState.locationFixTimedOut) {
         if (uiState.locationFixTimedOut) {
+            // Сбрасываем флаг сразу: сообщение не должно потеряться, если
+            // snackbar ждёт в очереди за другим.
+            viewModel.consumeLocationFixTimeout()
             snackbarHostState.showSnackbar(
-                message = "Не удалось определить местоположение. Проверьте GPS и попробуйте снова.",
+                message = "Не удалось определить местоположение. Выйдите на открытое место или проверьте GPS и нажмите «Где я» ещё раз.",
                 duration = SnackbarDuration.Long
             )
-            viewModel.consumeLocationFixTimeout()
         }
     }
 
@@ -366,7 +393,15 @@ fun MapScreen(
                             // Нажатие на температуру/ветер открывает окно с погодой + «Дорожные условия»
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.clickable { showWeatherOverlay = true }
+                                modifier = Modifier
+                                    .clickable(
+                                        onClickLabel = "Открыть погоду и дорожные условия",
+                                        role = Role.Button
+                                    ) { showWeatherOverlay = true }
+                                    .semantics {
+                                        contentDescription =
+                                            "Погода: ${weather.temp.toInt()} °C, ветер ${weather.windSpeed} м/с"
+                                    }
                             ) {
                                 Text(
                                     text = "${weather.temp.toInt()}°C",
@@ -383,7 +418,7 @@ fun MapScreen(
                             }
                             IconButton(onClick = { viewModel.refreshWeather(force = true) }) {
                                 if (uiState.showWeatherUpdated) {
-                                    Icon(Icons.Default.Check, contentDescription = null, tint = Color(0xFF4CAF50), modifier = Modifier.size(20.dp))
+                                    Icon(Icons.Default.Check, contentDescription = "Погода обновлена", tint = Color(0xFF4CAF50), modifier = Modifier.size(20.dp))
                                 } else {
                                     Icon(Icons.Default.Refresh, contentDescription = "Обновить", modifier = Modifier.size(20.dp))
                                 }
@@ -398,7 +433,10 @@ fun MapScreen(
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.outline,
-                                modifier = Modifier.clickable { showWeatherOverlay = true }
+                                modifier = Modifier.clickable(
+                                    onClickLabel = "Открыть погоду",
+                                    role = Role.Button
+                                ) { showWeatherOverlay = true }
                             )
                             IconButton(onClick = { viewModel.refreshWeather(force = true) }) {
                                 Icon(Icons.Default.Refresh, contentDescription = "Повторить загрузку погоды", modifier = Modifier.size(20.dp))
@@ -435,8 +473,13 @@ fun MapScreen(
                 onMapLoaded = { viewModel.onMapLoaded() },
                 onCameraMoved = { viewModel.onCameraMoved(it) },
                 isSheetOpen = showRoutesSheet,
+                hasTopStatus = uiState.busDataStatus != null || uiState.isTrafficVisible,
+                hasLocationPermission = hasLocationPermission,
                 nightMode = isDarkUi,
-                commands = viewModel.mapCommands
+                commands = viewModel.mapCommands,
+                onTrafficLoading = { viewModel.onTrafficLoading() },
+                onTrafficChanged = { level, color -> viewModel.onTrafficChanged(level, color) },
+                onTrafficExpired = { viewModel.onTrafficExpired() }
             )
 
             when (MapInteractionPolicy.surfaceStatus(
@@ -481,42 +524,66 @@ fun MapScreen(
 
             // Штормовое предупреждение — над всем остальным содержимым карты:
             // пассажир должен увидеть его до того, как начнёт планировать поездку.
-            uiState.weatherAlerts
-                .firstOrNull {
-                    // ADVISORY баннером не показываем: в Норильске ветер 8 м/с и
-                    // мороз −25 °C — рядовая погода, ради неё перекрывать карту
-                    // нельзя. Такие вещи видны в карточке погоды.
-                    it.level != WeatherAlertLevel.ADVISORY && it.id !in uiState.dismissedAlertIds
-                }
-                ?.let { alert ->
-                    WeatherAlertBanner(
-                        alert = alert,
-                        onDismiss = { viewModel.dismissWeatherAlert(alert.id) },
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(horizontal = 12.dp, vertical = 8.dp)
-                    )
+            // Штормовое предупреждение и статус GPS-данных складываются в одну
+            // колонку: раньше статус стоял на угаданном отступе 96 dp и при
+            // длинном предупреждении ложился поверх него.
+            Column(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                uiState.weatherAlerts
+                    .firstOrNull {
+                        // ADVISORY баннером не показываем: в Норильске ветер 8 м/с и
+                        // мороз −25 °C — рядовая погода, ради неё перекрывать карту
+                        // нельзя. Такие вещи видны в карточке погоды.
+                        it.level != WeatherAlertLevel.ADVISORY && it.id !in uiState.dismissedAlertIds
+                    }
+                    ?.let { alert ->
+                        WeatherAlertBanner(
+                            alert = alert,
+                            onDismiss = { viewModel.dismissWeatherAlert(alert.id) }
+                        )
+                    }
+
+                uiState.busDataStatus?.let { status ->
+                    BusDataStatusChip(status = status, isDemo = uiState.busesAreDemo)
                 }
 
-            uiState.busDataStatus?.let { status ->
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .padding(
-                            top = if (uiState.weatherAlerts.any {
-                                    it.level != WeatherAlertLevel.ADVISORY && it.id !in uiState.dismissedAlertIds
-                                }
-                            ) 96.dp else 8.dp
-                        ),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.94f),
-                    shadowElevation = 4.dp
-                ) {
-                    Text(
-                        text = status,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.labelMedium
-                    )
+                val trafficStatus = TrafficPolicy.status(
+                    enabled = uiState.isTrafficVisible,
+                    networkAvailable = uiState.isNetworkAvailable,
+                    sdkState = uiState.trafficSdkState,
+                    level = uiState.trafficLevel,
+                    levelColor = uiState.trafficLevelColor,
+                    timedOut = uiState.trafficTimedOut,
+                    accessDenied = uiState.trafficAccessDenied
+                )
+                trafficStatus.message?.let { message ->
+                    TrafficStatusChip(status = trafficStatus, message = message, onTurnOff = { viewModel.toggleTraffic() })
+                }
+
+                // Привязка поездки А→Б к дорогам идёт через сеть и может занять
+                // десятки секунд — без индикатора кнопка «Показать на карте»
+                // выглядела неработающей.
+                if (uiState.isBuildingRoads && uiState.selectedRoute == null) {
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        shadowElevation = 4.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Строим маршрут по дорогам…", style = MaterialTheme.typography.labelMedium)
+                        }
+                    }
                 }
             }
 
@@ -532,7 +599,7 @@ fun MapScreen(
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f))
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -545,14 +612,11 @@ fun MapScreen(
                                 color = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.weight(1f)
                             )
-                            // Кнопка закрыть шторку
-                            IconButton(
-                                onClick = { viewModel.collapseNearbyStops() },
-                                modifier = Modifier.size(28.dp)
-                            ) {
+                            // Кнопка закрыть шторку: стандартная зона нажатия 48 dp
+                            IconButton(onClick = { viewModel.collapseNearbyStops() }) {
                                 Icon(
                                     Icons.Default.Close,
-                                    contentDescription = "Закрыть",
+                                    contentDescription = "Закрыть ближайшие остановки",
                                     modifier = Modifier.size(18.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -586,19 +650,27 @@ fun MapScreen(
                                         Text(formatDistance(nearby.distanceMeters), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
                                     }
                                     Spacer(Modifier.height(4.dp))
+                                    val chipBackground = MaterialTheme.colorScheme.surface.toArgbLong()
                                     LazyRow(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                                         items(nearby.routes.take(5)) { routeSummary ->
+                                            // Светлые цвета маршрутов (жёлтый 15, 31) на светлом
+                                            // чипе не читаются — текст затемняется до контраста 4.5:1.
+                                            val chipContainer = RouteColors.composite(routeSummary.color, 0.14, chipBackground)
+                                            val chipLabel = RouteColors.readableOn(routeSummary.color, chipContainer)
                                             SuggestionChip(
-                                                onClick = { 
+                                                onClick = {
                                                     val fullRoute = uiState.routes.find { it.id == routeSummary.id }
                                                     viewModel.selectRoute(fullRoute)
                                                 },
-                                                label = { Text(routeSummary.number) },
+                                                label = { Text(routeSummary.number, fontWeight = FontWeight.Bold) },
+                                                modifier = Modifier.semantics {
+                                                    contentDescription = "Маршрут ${routeSummary.number}, показать на карте"
+                                                },
                                                 colors = SuggestionChipDefaults.suggestionChipColors(
-                                                    containerColor = Color(routeSummary.color).copy(alpha = 0.1f),
-                                                    labelColor = Color(routeSummary.color)
+                                                    containerColor = Color(chipContainer),
+                                                    labelColor = Color(chipLabel)
                                                 ),
-                                                border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = Color(routeSummary.color).copy(alpha = 0.3f))
+                                                border = SuggestionChipDefaults.suggestionChipBorder(enabled = true, borderColor = Color(chipLabel).copy(alpha = 0.45f))
                                             )
                                         }
                                     }
@@ -627,7 +699,7 @@ fun MapScreen(
                 Card(
                     shape = RoundedCornerShape(16.dp),
                     elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.98f))
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
                 ) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -644,13 +716,10 @@ fun MapScreen(
                                 fontWeight = FontWeight.ExtraBold,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(
-                                onClick = { viewModel.collapseNearbyStops() },
-                                modifier = Modifier.size(28.dp)
-                            ) {
+                            IconButton(onClick = { viewModel.collapseNearbyStops() }) {
                                 Icon(
                                     Icons.Default.Close,
-                                    contentDescription = "Закрыть",
+                                    contentDescription = "Закрыть подсказку",
                                     modifier = Modifier.size(18.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -695,7 +764,9 @@ fun MapScreen(
                 ) {
                     if (uiState.isLocatingUser) {
                         CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
+                            modifier = Modifier
+                                .size(22.dp)
+                                .semantics { contentDescription = "Где я: определяем местоположение" },
                             strokeWidth = 2.dp
                         )
                     } else {
@@ -724,14 +795,24 @@ fun MapScreen(
                     Icon(Icons.Default.Remove, contentDescription = "Отдалить")
                 }
 
+                // Переключатель «Пробки»: подпись под значком и заметно другой фон,
+                // когда слой включён, — раньше это был безымянный значок светофора.
                 FloatingActionButton(
                     onClick = { viewModel.toggleTraffic() },
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                    contentColor = if (uiState.isTrafficVisible) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground,
+                    containerColor = if (uiState.isTrafficVisible) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                    contentColor = if (uiState.isTrafficVisible) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                     shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.size(48.dp)
+                    modifier = Modifier
+                        .size(width = 56.dp, height = 52.dp)
+                        .semantics {
+                            contentDescription = if (uiState.isTrafficVisible) "Пробки: включены. Нажмите, чтобы выключить"
+                            else "Пробки: выключены. Нажмите, чтобы включить"
+                        }
                 ) {
-                    Icon(Icons.Default.Traffic, contentDescription = "Пробки")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Default.Traffic, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Text("Пробки", style = MaterialTheme.typography.labelSmall, maxLines = 1)
+                    }
                 }
                 
                 FloatingActionButton(
@@ -745,15 +826,18 @@ fun MapScreen(
             }
         }
 
-        // Окно погоды + карточка «Дорожные условия» (по тапу на температуру в шапке)
-        WeatherOverlay(
-            visible = showWeatherOverlay,
-            isLoading = uiState.isWeatherLoading,
-            weather = uiState.weather,
-            onDismiss = { showWeatherOverlay = false },
-            errorMessage = uiState.weatherError,
-            onRetry = { viewModel.refreshWeather(force = true) }
-        )
+        // Окно погоды + карточка «Дорожные условия» (по тапу на температуру в шапке).
+        // Отступ Scaffold обязателен: без него карточка уезжала под верхнюю панель.
+        Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
+            WeatherOverlay(
+                visible = showWeatherOverlay,
+                isLoading = uiState.isWeatherLoading,
+                weather = uiState.weather,
+                onDismiss = { showWeatherOverlay = false },
+                errorMessage = uiState.weatherError,
+                onRetry = { viewModel.refreshWeather(force = true) }
+            )
+        }
 
         // Stop Details Sheet
         uiState.selectedStop?.let { stop ->
@@ -763,6 +847,7 @@ fun MapScreen(
                 isFavorite = uiState.favoriteStopIds.contains(stop.id),
                 onToggleFavorite = { viewModel.toggleFavoriteStop(stop.id) },
                 arrivals = uiState.arrivalsAtSelectedStop,
+                liveArrivalRouteIds = uiState.liveArrivalRouteIds,
                 accessibleRouteIds = uiState.accessibleArrivalsAtSelectedStop,
                 scheduleByRouteId = uiState.scheduleByRouteId,
                 dataDate = uiState.scheduleDataDate,
@@ -932,7 +1017,9 @@ fun MapScreen(
                             state = routesListState,
                             modifier = Modifier.fillMaxWidth().weight(1f)
                         ) {
-                            if (uiState.searchCategory == SearchCategory.ROUTES) {
+                            if (!uiState.isRouteDataLoaded) {
+                                item { RouteDataLoading() }
+                            } else if (uiState.searchCategory == SearchCategory.ROUTES) {
                                 if (uiState.filteredRoutes.isEmpty()) {
                                     item { EmptySearchResult(uiState.searchText) }
                                 }
@@ -984,7 +1071,7 @@ fun MapScreen(
                                 scope.launch { routesSheetState.partialExpand() }
                             },
                             onStopClick = { stop ->
-                                viewModel.selectStopAndFocus(stop)
+                                viewModel.showStopOnRoute(routeDetails!!, stop)
                                 scope.launch { routesSheetState.partialExpand() }
                             },
                             onClose = { showRoutesSheet = false }
@@ -1113,6 +1200,117 @@ fun MapScreen(
     }
 }
 
+/**
+ * Точка камеры, при которой [point] окажется на [dp] выше центра экрана
+ * (Web Mercator, мир на масштабе z — 256·2^z dp, как в StopLabelPolicy).
+ */
+private fun shiftSouthOnScreen(point: Point, zoom: Float, dp: Float): Point {
+    val worldSize = 256.0 * Math.pow(2.0, zoom.toDouble())
+    val latRad = Math.toRadians(point.latitude)
+    val y = (1.0 - Math.log(Math.tan(latRad) + 1.0 / Math.cos(latRad)) / Math.PI) / 2.0 * worldSize
+    val shiftedY = (y + dp) / worldSize
+    val lat = Math.toDegrees(Math.atan(Math.sinh(Math.PI * (1.0 - 2.0 * shiftedY))))
+    return Point(lat, point.longitude)
+}
+
+/** ARGB цвета Compose в виде Long — для расчёта контраста в [RouteColors]. */
+private fun Color.toArgbLong(): Long {
+    fun ch(v: Float) = (v.coerceIn(0f, 1f) * 255f + 0.5f).toLong()
+    return 0xFF000000 or (ch(red) shl 16) or (ch(green) shl 8) or ch(blue)
+}
+
+/** Доля высоты экрана, с которой начинается частично раскрытая шторка маршрутов. */
+private const val ROUTES_SHEET_PARTIAL_TOP_FRACTION = 0.5f
+
+@Composable
+private fun RouteDataLoading() {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 28.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+        Spacer(Modifier.width(12.dp))
+        Text("Загружаем маршруты…", style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/**
+ * Статус GPS-данных над картой. Демо-режим оформлен отдельно и прямо говорит,
+ * что значки автобусов условные: иначе пассажир примет их за реальные машины.
+ */
+@Composable
+private fun BusDataStatusChip(status: String, isDemo: Boolean) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (isDemo) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        contentColor = if (isDemo) MaterialTheme.colorScheme.onTertiaryContainer else MaterialTheme.colorScheme.onSurface,
+        shadowElevation = 4.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Info, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = status,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (isDemo) FontWeight.Bold else FontWeight.Normal,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/**
+ * Состояние слоя пробок над картой. Если Яндекс не прислал данные, здесь так и
+ * написано — цвет дорог приложение никогда не дорисовывает само.
+ */
+@Composable
+private fun TrafficStatusChip(status: TrafficPolicy.Status, message: String, onTurnOff: () -> Unit) {
+    val dot = when (status.levelColor) {
+        TrafficPolicy.LevelColor.GREEN -> Color(0xFF3BB54A)
+        TrafficPolicy.LevelColor.YELLOW -> Color(0xFFFFC107)
+        TrafficPolicy.LevelColor.RED -> Color(0xFFE53935)
+        null -> null
+    }
+    val problem = status.kind == TrafficPolicy.Kind.NO_NETWORK || status.kind == TrafficPolicy.Kind.NO_DATA ||
+        status.kind == TrafficPolicy.Kind.ACCESS_DENIED
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (problem) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surface.copy(alpha = 0.96f),
+        contentColor = if (problem) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface,
+        shadowElevation = 4.dp
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, top = 4.dp, bottom = 4.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            when {
+                status.kind == TrafficPolicy.Kind.LOADING || status.kind == TrafficPolicy.Kind.EXPIRED ->
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                !problem && dot != null -> Box(Modifier.size(14.dp).background(dot, CircleShape))
+                else -> Icon(Icons.Default.Traffic, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = message,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            IconButton(onClick = onTurnOff, modifier = Modifier.size(36.dp)) {
+                Icon(Icons.Default.Close, contentDescription = "Выключить пробки", modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
 private fun Modifier.rotate(degrees: Float): Modifier = this.then(
     Modifier.graphicsLayer(rotationZ = degrees)
 )
@@ -1144,19 +1342,15 @@ fun RouteDetailsView(
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Назад") }
             Text(text = "Маршрут №${route.number}", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-            IconButton(onClick = onToggleFavorite) {
-                Icon(
-                    imageVector = if (isFavorite) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                    contentDescription = "Избранное",
-                    tint = if (isFavorite) Color(0xFFFFC107) else MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
+            FavoriteToggleButton(isFavorite = isFavorite, itemLabel = "маршрут №${route.number}", onToggle = onToggleFavorite)
             TextButton(onClick = onClose) { Text("Закрыть") }
         }
         
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(
-                text = "${route.origin} ↔ ${route.destination}",
+                // Каждый вариант маршрута направленный: «↔» вводил в заблуждение.
+                text = if (route.origin == route.destination) "${route.origin} · кольцевой"
+                else "${route.origin} → ${route.destination}",
                 modifier = Modifier.weight(1f),
                 style = MaterialTheme.typography.bodyMedium
             )
@@ -1245,8 +1439,13 @@ fun YandexMapView(
     onMapLoaded: () -> Unit,
     onCameraMoved: (Float) -> Unit,
     isSheetOpen: Boolean,
+    hasTopStatus: Boolean = false,
+    hasLocationPermission: Boolean = false,
     nightMode: Boolean,
-    commands: kotlinx.coroutines.flow.SharedFlow<MapCommand>
+    commands: kotlinx.coroutines.flow.SharedFlow<MapCommand>,
+    onTrafficLoading: () -> Unit = {},
+    onTrafficChanged: (Int?, TrafficPolicy.LevelColor?) -> Unit = { _, _ -> },
+    onTrafficExpired: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -1270,11 +1469,53 @@ fun YandexMapView(
             isTrafficVisible = uiState.isTrafficVisible
         }
     }
+    val currentOnTrafficLoading by rememberUpdatedState(onTrafficLoading)
+    val currentOnTrafficChanged by rememberUpdatedState(onTrafficChanged)
+    val currentOnTrafficExpired by rememberUpdatedState(onTrafficExpired)
+    // MapKit держит слушателя только по слабой ссылке: сильная ссылка — здесь.
+    // Без слушателя приложение не знало, пришли ли данные, и не могло сказать
+    // пассажиру, почему дороги не окрашены.
+    val trafficListener = remember(trafficLayer) {
+        object : TrafficListener {
+            override fun onTrafficChanged(trafficLevel: TrafficLevel?) {
+                val color = when (trafficLevel?.color) {
+                    TrafficColor.GREEN -> TrafficPolicy.LevelColor.GREEN
+                    TrafficColor.YELLOW -> TrafficPolicy.LevelColor.YELLOW
+                    TrafficColor.RED -> TrafficPolicy.LevelColor.RED
+                    null -> null
+                }
+                currentOnTrafficChanged(trafficLevel?.level, color)
+            }
+            override fun onTrafficLoading() = currentOnTrafficLoading()
+            override fun onTrafficExpired() = currentOnTrafficExpired()
+        }
+    }
+    DisposableEffect(trafficLayer, trafficListener) {
+        val ref = WeakReference<TrafficListener>(trafficListener)
+        trafficLayer.addTrafficListener(ref)
+        onDispose {
+            if (trafficLayer.isValid) trafficLayer.removeTrafficListener(ref)
+        }
+    }
 
     val locationLayer = remember {
         MapKitFactory.getInstance().createUserLocationLayer(mapView.mapWindow).apply {
-            isVisible = true
+            isVisible = hasLocationPermission
         }
+    }
+    // MapKit подписывается на геолокацию при включении слоя и после
+    // SecurityException (разрешения ещё нет) сам не повторяет попытку: на первом
+    // запуске метка «я здесь» не появлялась до перезапуска приложения. Слой
+    // включается только с разрешением, а при его выдаче location manager
+    // MapKit перезапускается.
+    var locationLayerArmed by remember { mutableStateOf(hasLocationPermission) }
+    LaunchedEffect(hasLocationPermission) {
+        if (hasLocationPermission && !locationLayerArmed) {
+            MapKitFactory.getInstance().resetLocationManagerToDefault()
+            locationLayer.isVisible = false
+            locationLayerArmed = true
+        }
+        locationLayer.isVisible = hasLocationPermission
     }
 
     val routeCollection = remember { mapView.mapWindow.map.mapObjects.addCollection() }
@@ -1285,6 +1526,49 @@ fun YandexMapView(
     val stopIcon = remember { imageProviderFromVector(context, R.drawable.ic_stop_marker) }
     val stopSelectedIcon = remember { imageProviderFromVector(context, R.drawable.ic_stop_selected_marker) }
     val busIcon = remember { imageProviderFromVector(context, R.drawable.ic_bus_marker) }
+    val currentIsSheetOpen by rememberUpdatedState(isSheetOpen)
+    val currentHasTopStatus by rememberUpdatedState(hasTopStatus)
+    val density = context.resources.displayMetrics.density
+
+    /**
+     * Камера вписывает [points] в ту часть карты, которую пассажир реально видит:
+     * без полосы статуса сверху, кнопок справа и шторки маршрутов снизу.
+     * Раньше маршрут подгонялся под весь экран и наполовину уходил под шторку.
+     */
+    fun fitToVisibleArea(points: List<Point>, animated: Boolean = true) {
+        if (points.isEmpty()) return
+        val map = mapView.mapWindow.map
+        val geometry = Geometry.fromPolyline(Polyline(points))
+        val width = mapView.mapWindow.width().toFloat()
+        val height = mapView.mapWindow.height().toFloat()
+        val position = if (width <= 0f || height <= 0f) {
+            map.cameraPosition(geometry)
+        } else {
+            val location = IntArray(2)
+            mapView.getLocationOnScreen(location)
+            val screenHeight = mapView.rootView.height.toFloat().takeIf { it > 0f } ?: (location[1] + height)
+            val visibleBottom = if (currentIsSheetOpen) {
+                (screenHeight * ROUTES_SHEET_PARTIAL_TOP_FRACTION - location[1]).coerceIn(height * 0.3f, height)
+            } else {
+                height
+            }
+            // Боковые поля — под половину ширины подписи конечной остановки.
+            val left = 64f * density
+            val top = (if (currentHasTopStatus) 88f else 32f) * density
+            val right = width - 80f * density
+            val bottom = visibleBottom - 24f * density
+            if (right - left < 48f * density || bottom - top < 48f * density) {
+                map.cameraPosition(geometry)
+            } else {
+                map.cameraPosition(geometry, ScreenRect(ScreenPoint(left, top), ScreenPoint(right, bottom)))
+            }
+        }
+        if (animated) {
+            map.move(position, com.yandex.mapkit.Animation(com.yandex.mapkit.Animation.Type.SMOOTH, 0.8f), null)
+        } else {
+            map.move(position)
+        }
+    }
 
     // Persistent tap listener for stops (ищем остановку среди ВСЕХ маршрутов,
     // используя актуальное состояние — раньше тут было устаревшее замыкание и тап не срабатывал)
@@ -1324,7 +1608,11 @@ fun YandexMapView(
         }
     }
 
-    LaunchedEffect(uiState.isTrafficVisible) { trafficLayer.isTrafficVisible = uiState.isTrafficVisible }
+    // Слой включается и после возврата карты на экран (новый MapView создаёт
+    // новый слой), поэтому ключ — и состояние, и сам слой.
+    LaunchedEffect(trafficLayer, uiState.isTrafficVisible) {
+        if (trafficLayer.isValid) trafficLayer.isTrafficVisible = uiState.isTrafficVisible
+    }
     // Ночной режим карты вслед за тёмной темой приложения
     LaunchedEffect(nightMode) { mapView.mapWindow.map.setNightModeEnabled(nightMode) }
     
@@ -1340,19 +1628,15 @@ fun YandexMapView(
                         null
                     )
                 }
-                is MapCommand.FocusPoints -> {
-                    if (command.points.isNotEmpty()) {
-                        val geometry = Geometry.fromPolyline(Polyline(command.points))
-                        mapView.mapWindow.map.move(
-                            mapView.mapWindow.map.cameraPosition(geometry),
-                            com.yandex.mapkit.Animation(com.yandex.mapkit.Animation.Type.SMOOTH, 0.8f),
-                            null
-                        )
-                    }
-                }
+                is MapCommand.FocusPoints -> fitToVisibleArea(command.points)
                 is MapCommand.FocusUserLocation -> {
+                    // Вместе с «Где я» снизу открывается панель «Ближайшие остановки»:
+                    // в центре карты метка пассажира оказывалась под ней. Ставим точку
+                    // примерно на 30 % высоты карты — над панелью.
+                    val zoom = 15f
+                    val heightDp = mapView.mapWindow.height() / density
                     mapView.mapWindow.map.move(
-                        CameraPosition(command.point, 15f, 0f, 0f),
+                        CameraPosition(shiftSouthOnScreen(command.point, zoom, heightDp * 0.2f), zoom, 0f, 0f),
                         com.yandex.mapkit.Animation(com.yandex.mapkit.Animation.Type.SMOOTH, 0.8f),
                         null
                     )
@@ -1424,18 +1708,23 @@ fun YandexMapView(
     )
 
     // Selective updates of map objects
-    LaunchedEffect(uiState.selectedRoutePolyline, uiState.selectedRoute?.color) {
+    LaunchedEffect(uiState.selectedRoutePolyline, uiState.selectedRoute?.color, uiState.isTrafficVisible) {
         routeCollection.clear()
         if (uiState.selectedRoutePolyline.isNotEmpty() && uiState.selectedRoute != null) {
             val geometry = Polyline(uiState.selectedRoutePolyline)
-            routeCollection.addPolyline(geometry).apply {
-                setStrokeColor(0xFF000000.toInt())
-                strokeWidth = 8f
-                zIndex = 1f
+            // Линия маршрута лежит над слоем пробок: при включённых пробках она
+            // тоньше и полупрозрачная, чтобы не закрывать цвет улицы.
+            val stroke = TrafficPolicy.routeStroke(uiState.isTrafficVisible)
+            if (stroke.outlineWidth > 0f) {
+                routeCollection.addPolyline(geometry).apply {
+                    setStrokeColor(stroke.outlineColor)
+                    strokeWidth = stroke.outlineWidth
+                    zIndex = 1f
+                }
             }
             routeCollection.addPolyline(geometry).apply {
-                setStrokeColor(uiState.selectedRoute!!.color.toInt())
-                strokeWidth = 4f
+                setStrokeColor(TrafficPolicy.withAlpha(uiState.selectedRoute!!.color.toInt(), stroke.lineAlpha))
+                strokeWidth = stroke.lineWidth
                 zIndex = 2f
             }
         }
@@ -1443,8 +1732,9 @@ fun YandexMapView(
 
     // Маршрут А→Б на карте: автобусы цветом маршрута, пешком — серым,
     // точки Посадка / Пересадка / Выход подписаны прямо на карте.
-    LaunchedEffect(uiState.journeySegments, uiState.journeyMarkers) {
+    LaunchedEffect(uiState.journeySegments, uiState.journeyMarkers, uiState.isTrafficVisible) {
         journeyCollection.clear()
+        val journeyStroke = TrafficPolicy.routeStroke(uiState.isTrafficVisible, journey = true)
         uiState.journeySegments.forEach { seg ->
             if (seg.points.size >= 2) {
                 val pl = Polyline(seg.points)
@@ -1460,15 +1750,17 @@ fun YandexMapView(
                         } catch (_: Throwable) { /* старый MapKit без пунктира — оставим сплошную */ }
                     }
                 } else {
-                    // тёмная окантовка + цвет маршрута
-                    journeyCollection.addPolyline(pl).apply {
-                        setStrokeColor(0xFF000000.toInt())
-                        strokeWidth = 9f
-                        zIndex = 5f
+                    // тёмная окантовка + цвет маршрута (при пробках — без окантовки, полупрозрачно)
+                    if (journeyStroke.outlineWidth > 0f) {
+                        journeyCollection.addPolyline(pl).apply {
+                            setStrokeColor(journeyStroke.outlineColor)
+                            strokeWidth = journeyStroke.outlineWidth
+                            zIndex = 5f
+                        }
                     }
                     journeyCollection.addPolyline(pl).apply {
-                        setStrokeColor(seg.color.toInt())
-                        strokeWidth = 5f
+                        setStrokeColor(TrafficPolicy.withAlpha(seg.color.toInt(), journeyStroke.lineAlpha))
+                        strokeWidth = journeyStroke.lineWidth
                         zIndex = 6f
                     }
                 }
@@ -1481,7 +1773,11 @@ fun YandexMapView(
                 setText(m.label, com.yandex.mapkit.map.TextStyle().apply {
                     size = 11f
                     offset = 6f
-                    placement = TextStyle.Placement.TOP
+                    outlineWidth = 2f
+                    // «До остановки … пешком» стоит в той же точке, что и «Посадка»:
+                    // подписи разводятся над и под точкой, иначе сливаются.
+                    placement = if (m.label.startsWith("До остановки")) TextStyle.Placement.BOTTOM
+                    else TextStyle.Placement.TOP
                 })
                 // метка кликабельна как обычная остановка (откроет маршруты/расписание)
                 if (m.stopId != null) {
@@ -1492,28 +1788,47 @@ fun YandexMapView(
         }
     }
 
-    LaunchedEffect(uiState.selectedRoute?.stops, uiState.areStopsVisible, uiState.highlightedStopId) {
+    val labelZoomBucket = StopLabelPolicy.zoomBucket(uiState.cameraZoom)
+    LaunchedEffect(uiState.selectedRoute?.stops, uiState.areStopsVisible, uiState.highlightedStopId, labelZoomBucket) {
         stopsCollection.clear()
-        if (uiState.areStopsVisible && uiState.selectedRoute != null) {
-            uiState.selectedRoute!!.stops.forEach { stop ->
+        val route = uiState.selectedRoute
+        if (uiState.areStopsVisible && route != null) {
+            // Подписи — только там, где они помещаются: выделенная, конечные, затем
+            // по порядку следования. Остальные точки остаются нажимаемыми.
+            val labelled = StopLabelPolicy.visibleLabelStopIds(
+                stops = route.stops,
+                zoom = uiState.cameraZoom,
+                highlightedStopId = uiState.highlightedStopId
+            )
+            route.stops.distinctBy { it.id }.forEach { stop ->
                 val isHighlighted = stop.id == uiState.highlightedStopId
                 val pm = stopsCollection.addPlacemark(stop.location)
                 pm.setIcon(if (isHighlighted) stopSelectedIcon else stopIcon)
                 pm.zIndex = if (isHighlighted) 10f else 3f
                 pm.userData = stop.id
                 pm.addTapListener(stopTapListenerRef)
-                
-                // Названия остановок показываем всегда для выбранного маршрута
-                pm.setText(stop.name, com.yandex.mapkit.map.TextStyle().apply {
-                    size = if (isHighlighted) 12f else 9f
-                    offset = 5f
-                    placement = TextStyle.Placement.BOTTOM
-                })
+
+                if (stop.id in labelled) {
+                    pm.setText(stop.name, com.yandex.mapkit.map.TextStyle().apply {
+                        size = if (isHighlighted) StopLabelPolicy.HIGHLIGHTED_TEXT_SIZE else StopLabelPolicy.LABEL_TEXT_SIZE
+                        // Сбоку от точки: с BOTTOM MapKit прижимал подпись к точке
+                        // краем, и она казалась подписью соседней остановки.
+                        offset = 4f
+                        placement = when (StopLabelPolicy.labelSide(stop, route.stops)) {
+                            StopLabelPolicy.Side.LEFT -> TextStyle.Placement.LEFT
+                            StopLabelPolicy.Side.RIGHT -> TextStyle.Placement.RIGHT
+                        }
+                        outlineWidth = 2f
+                        // Подпись может уступить место значкам карты; пересечения
+                        // подписей между собой исключает StopLabelPolicy выше.
+                        textOptional = !isHighlighted
+                    })
+                }
             }
         }
     }
 
-    LaunchedEffect(uiState.buses, uiState.areBusesVisible, uiState.selectedRoute?.id) {
+    LaunchedEffect(uiState.buses, uiState.areBusesVisible, uiState.selectedRoute?.id, uiState.busesAreDemo) {
         busesCollection.clear()
         if (uiState.areBusesVisible) {
             uiState.buses.forEach { bus ->
@@ -1521,6 +1836,12 @@ fun YandexMapView(
                     busesCollection.addPlacemark(bus.location).apply {
                         setIcon(busIcon)
                         zIndex = 4f
+                        if (uiState.busesAreDemo) {
+                            // Демо-автобусы не должны выглядеть как настоящие GPS-метки:
+                            // полупрозрачные значки + плашка «Демо-режим» над картой.
+                            // Подпись на каждом значке давала кашу в центре города.
+                            opacity = 0.5f
+                        }
                     }
                 }
             }
@@ -1530,24 +1851,8 @@ fun YandexMapView(
     // Camera move effect when route is selected (initial focus)
     LaunchedEffect(uiState.selectedRoute?.id) {
         uiState.selectedRoute?.let { route ->
-            if (route.polyline.isNotEmpty()) {
-                val geometry = Geometry.fromPolyline(Polyline(route.polyline))
-                var cameraPos = mapView.mapWindow.map.cameraPosition(geometry)
-                
-                if (isSheetOpen) {
-                    cameraPos = CameraPosition(
-                        Point(cameraPos.target.latitude - 0.01, cameraPos.target.longitude),
-                        cameraPos.zoom - 0.5f,
-                        cameraPos.azimuth,
-                        cameraPos.tilt
-                    )
-                }
-
-                mapView.mapWindow.map.move(
-                    cameraPos,
-                    com.yandex.mapkit.Animation(com.yandex.mapkit.Animation.Type.SMOOTH, 0.8f),
-                    null
-                )
+            if (route.id != currentUiState.skipRouteFitForRouteId) {
+                fitToVisibleArea(route.polyline.ifEmpty { route.stops.map { it.location } })
             }
         }
     }
@@ -1736,7 +2041,7 @@ fun PlannerSheet(
                         variants.forEachIndexed { idx, v ->
                             val label = v.steps.filter { it.type == com.example.data.RoutePlanner.StepType.RIDE }
                                 .joinToString(" → ") { it.routeNumber ?: "?" }
-                            val sub = if (v.transfers == 0) "без пересадок" else "пересадок: ${v.transfers}"
+                            val sub = com.example.data.transfersPhrase(v.transfers)
                             FilterChip(
                                 selected = idx == selectedVariant,
                                 onClick = { onSelectVariant(idx) },
@@ -1759,7 +2064,7 @@ fun PlannerSheet(
                             JourneyStat("В пути", "~${j.totalMinutes} мин")
                             JourneyStat("Расстояние", "${"%.1f".format(j.totalDistanceMeters / 1000)} км")
                             JourneyStat("Пешком", formatDistance(j.walkMeters))
-                            JourneyStat("Пересадки", j.transfers.toString())
+                            JourneyStat(com.example.data.transfersLabel(j.transfers), j.transfers.toString())
                         }
                     }
                     Spacer(Modifier.height(8.dp))
@@ -1836,14 +2141,13 @@ private fun JourneyStepRow(step: com.example.data.RoutePlanner.JourneyStep, onSh
         verticalAlignment = Alignment.CenterVertically
     ) {
         if (isRide) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(Color(step.routeColor), RoundedCornerShape(10.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(step.routeNumber ?: "", color = Color.White, fontWeight = FontWeight.Black, fontSize = 14.sp)
-            }
+            RouteNumberBadge(
+                number = step.routeNumber ?: "",
+                colorArgb = step.routeColor,
+                size = 40.dp,
+                fontSize = 14.sp,
+                borderWidth = 0.dp
+            )
         } else {
             Box(
                 modifier = Modifier

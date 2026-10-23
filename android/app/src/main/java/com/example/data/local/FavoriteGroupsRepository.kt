@@ -3,26 +3,25 @@ package com.example.data.local
 import android.content.Context
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
-import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import java.util.UUID
 
-private val Context.favGroupsStore by preferencesDataStore(name = "favorite_groups")
-
 /**
  * Хранит группы избранного («На работу», «На дачу» …) в DataStore как JSON-список.
  * Каждый маршрут/остановка может входить в любое число групп (или ни в одну).
  */
-class FavoriteGroupsRepository(private val context: Context) {
+class FavoriteGroupsRepository(context: Context) {
+
+    private val store = SafePreferenceStores.get(context, "favorite_groups")
 
     private val key = stringPreferencesKey("groups_json")
     private val json = Json { ignoreUnknownKeys = true }
     private val serializer = ListSerializer(FavoriteGroup.serializer())
 
-    val groups: Flow<List<FavoriteGroup>> = context.favGroupsStore.data.map { prefs ->
+    val groups: Flow<List<FavoriteGroup>> = store.safeData().map { prefs ->
         decode(prefs[key])
     }
 
@@ -36,8 +35,8 @@ class FavoriteGroupsRepository(private val context: Context) {
     }
 
     private suspend fun update(transform: (List<FavoriteGroup>) -> List<FavoriteGroup>) {
-        context.favGroupsStore.edit { prefs ->
-            val current = decode(prefs[key])
+        store.edit { prefs ->
+            val current = prefs.decodeListPreservingUnreadable(key) { json.decodeFromString(serializer, it) }
             prefs[key] = json.encodeToString(serializer, transform(current))
         }
     }
