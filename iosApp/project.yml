@@ -21,7 +21,6 @@ settings:
     CURRENT_PROJECT_VERSION: "8"
     CODE_SIGN_STYLE: Automatic
     DEVELOPMENT_TEAM: ""  # Заполнить Apple Developer ID (10-символьный)
-    ENABLE_BITCODE: YES
 
 targets:
   NorilskTransit:
@@ -29,10 +28,12 @@ targets:
     platform: iOS
     sources:
       - path: Sources
-    resources:
+      # У таргета XcodeGen нет ключа `resources:` — ресурсы задаются через
+      # sources с фазой resources, иначе JSON не попадает в .app.
       - path: Resources
-      - path: ../app/src/main/assets/norilsk_routes.json
-      - path: ../app/src/main/assets/norilsk_schedule.json
+        buildPhase: resources
+        excludes:
+          - Info.plist
     info:
       path: Resources/Info.plist
       properties:
@@ -40,7 +41,6 @@ targets:
         CFBundleShortVersionString: "1.2.6"
         CFBundleVersion: "8"
         UILaunchStoryboardName: LaunchScreen
-        UIRequiredDeviceCapabilities: [armv7]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIUserInterfaceStyle: Dark
         NSLocationWhenInUseUsageDescription: "Нужен для отображения ближайших остановок и работы будильника у выбранной остановки"

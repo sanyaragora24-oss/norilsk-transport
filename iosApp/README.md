@@ -4,7 +4,7 @@ SwiftUI каркас iOS-версии приложения «Норильски�
 
 ## Структура
 
-- `NorilskTransitApp.swift` — entry point (`@main`)
+- `Sources/App/NorilskTransitApp.swift` — entry point (`@main`)
 - `Sources/App/` — состояние приложения
   - `RoutesStore.swift` — загрузка `norilsk_routes.json` из bundle
   - `LocationManager.swift` — обёртка над CLLocationManager

@@ -12,7 +12,7 @@
 ## Что уже подготовлено на Windows
 
 В `iosApp/` лежит каркас проекта:
-- `NorilskTransitApp.swift` — SwiftUI App entry point
+- `Sources/App/NorilskTransitApp.swift` — SwiftUI App entry point
 - `Sources/Map/MapScreen.swift` — карта Яндекс с маршрутами
 - `Sources/Routes/RouteListSheet.swift`, `RouteDetailScreen.swift` — список и детали
 - `Sources/Stop/StopScreen.swift` — экран остановки с будильником

@@ -15,7 +15,7 @@ name: iOS Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, ios-ci-route31-readiness]
     paths:
       - 'iosApp/**'
       - '.github/workflows/ios-build.yml'
@@ -32,12 +32,14 @@ concurrency:
 jobs:
   build:
     name: Build iOS app (Xcode ${{ matrix.xcode }}, iOS ${{ matrix.ios }})
-    runs-on: macos-14  # Apple Silicon, быстрее
+    # macos-15: на macos-14 по умолчанию Xcode 15.4, а свежие xcodegen и
+    # CocoaPods пишут проекты в формате Xcode 16 (77), который 15.4 не открывает.
+    runs-on: macos-15  # Apple Silicon
 
     strategy:
       fail-fast: false
       matrix:
-        xcode: ['16.0']
+        xcode: ['16']
         ios: ['17.0']
 
     env:
@@ -47,6 +49,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Select Xcode ${{ matrix.xcode }}
+        run: |
+          XC=$(ls -d /Applications/Xcode_${{ matrix.xcode }}*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XC" ]; then
+            echo "::error::Xcode ${{ matrix.xcode }}.x not found on this runner"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          sudo xcode-select -s "$XC/Contents/Developer"
+          echo "Selected $XC"
 
       - name: Show toolchain versions
         run: |
@@ -102,21 +115,25 @@ jobs:
           print(f'schedule: {len(s[\"routes\"])}')
           assert len(r['routes']) > 50, 'routes count too low'
           assert len(s['routes']) > 50, 'schedule count too low'
+          route31 = [x for x in r['routes'] if str(x.get('number', '')).strip() == '31']
+          assert route31, 'route 31 missing'
+          print(f'route 31 directions: {len(route31)}')
           print('OK')
           "
 
       - name: Build for simulator (verification only)
         working-directory: iosApp
         run: |
+          set -o pipefail
           xcodebuild \
             -workspace NorilskTransit.xcworkspace \
             -scheme NorilskTransit \
             -configuration Debug \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15,OS=latest' \
+            -destination 'generic/platform=iOS Simulator' \
             -quiet \
             build 2>&1 | tee build.log | tail -100
-          echo "=== Build status: $? ==="
+          echo "=== Build completed successfully ==="
 
       - name: Verify .app bundle
         working-directory: iosApp

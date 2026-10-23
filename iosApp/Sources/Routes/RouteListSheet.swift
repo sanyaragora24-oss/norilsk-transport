@@ -90,7 +90,7 @@ struct RouteRow: View {
                     .font(.system(size: 22, weight: .black))
                     .foregroundColor(.white)
                     .frame(width: 56, height: 56)
-                    .background(Color(route.colorArgb), in: RoundedRectangle(cornerRadius: 12))
+                    .background(Color(UIColor(route.colorArgb)), in: RoundedRectangle(cornerRadius: 12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Color.black, lineWidth: 2.5)
