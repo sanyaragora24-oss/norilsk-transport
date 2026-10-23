@@ -50,7 +50,7 @@ struct RouteDetailScreen: View {
                 .font(.system(size: 28, weight: .black))
                 .foregroundColor(.white)
                 .frame(width: 64, height: 64)
-                .background(Color(route.colorArgb), in: RoundedRectangle(cornerRadius: 14))
+                .background(Color(UIColor(route.colorArgb)), in: RoundedRectangle(cornerRadius: 14))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
                         .stroke(Color.black, lineWidth: 3)

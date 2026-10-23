@@ -14,8 +14,9 @@ struct NorilskTransitApp: App {
     init() {
         // Initialize Yandex MapKit with API key from Info.plist
         if let apiKey = Bundle.main.object(forInfoDictionaryKey: "YANDEX_MAPKIT_API_KEY") as? String {
-            YMKMapKitFactory.sharedInstance().apiKey = apiKey
+            YMKMapKit.setApiKey(apiKey)
         }
+        YMKMapKit.sharedInstance().onStart()
     }
 
     var body: some Scene {

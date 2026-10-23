@@ -60,8 +60,10 @@ struct YandexMapView: UIViewRepresentable {
     let userLocation: CLLocation?
 
     func makeUIView(context: Context) -> YMKMapView {
-        let mapView = YMKMapView(frame: .zero)
-        mapView.mapType = .map
+        // Инициализатор в разных версиях SDK то nullable, то нет — так компилируется в обоих случаях.
+        let created: YMKMapView? = YMKMapView(frame: .zero)
+        guard let mapView = created else { fatalError("YMKMapView init failed") }
+        context.coordinator.mapObjects = mapView.mapWindow.map.mapObjects.addCollection()
         // Move to Norilsk
         let norilsk = YMKPoint(latitude: 69.34, longitude: 88.21)
         mapView.mapWindow.map.move(with: YMKCameraPosition(target: norilsk, zoom: 11, azimuth: 0, tilt: 0))
@@ -70,12 +72,13 @@ struct YandexMapView: UIViewRepresentable {
 
     func updateUIView(_ uiView: YMKMapView, context: Context) {
         // Clear previous polylines
-        context.coordinator.mapObjects.removeAll()
+        guard let mapObjects = context.coordinator.mapObjects else { return }
+        mapObjects.clear()
 
         // Draw routes
         for route in routes {
-            let polyline = YMKPolyline(points: route.stops.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }, segments: [])
-            let polylineObj = context.coordinator.mapObjects.addPolyline(with: polyline)
+            let polyline = YMKPolyline(points: route.stops.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) })
+            let polylineObj = mapObjects.addPolyline(with: polyline)
             polylineObj.strokeColor = UIColor(route.colorArgb)
             polylineObj.strokeWidth = 4
             polylineObj.isVisible = (selectedRoute == nil || selectedRoute?.id == route.id) ? true : false
@@ -83,8 +86,8 @@ struct YandexMapView: UIViewRepresentable {
 
         // Draw selected route polyline (if exists)
         if let route = selectedRoute {
-            let polyline = YMKPolyline(points: route.polyline.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) }, segments: [])
-            let polylineObj = context.coordinator.mapObjects.addPolyline(with: polyline)
+            let polyline = YMKPolyline(points: route.polyline.map { YMKPoint(latitude: $0.lat, longitude: $0.lon) })
+            let polylineObj = mapObjects.addPolyline(with: polyline)
             polylineObj.strokeColor = UIColor(route.colorArgb)
             polylineObj.strokeWidth = 6
             polylineObj.isVisible = true
@@ -94,10 +97,8 @@ struct YandexMapView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     class Coordinator {
-        let mapObjects: YMKMapObjectCollection
-        init() {
-            self.mapObjects = YMKMapView().mapWindow.map.mapObjects.add()
-        }
+        // Коллекция линий на карте этого YMKMapView; создаётся в makeUIView.
+        var mapObjects: YMKMapObjectCollection?
     }
 }
 
@@ -143,5 +144,41 @@ struct MapTopBar: View {
         let f = DateFormatter()
         f.dateFormat = "dd.MM HH:mm"
         return f.string(from: Date())
+    }
+}
+
+// Заглушки экранов меню и избранного: в Android-версии это отдельные экраны,
+// на iOS они ещё не перенесены.
+struct MenuScreen: View {
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Text("Меню появится в следующей версии")
+                .foregroundColor(.secondary)
+                .navigationTitle("Меню")
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Закрыть") { dismiss() }
+                    }
+                }
+        }
+    }
+}
+
+struct FavoritesScreen: View {
+    @Environment(\.dismiss) var dismiss
+
+    var body: some View {
+        NavigationStack {
+            Text("Избранное появится в следующей версии")
+                .foregroundColor(.secondary)
+                .navigationTitle("Избранное")
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Закрыть") { dismiss() }
+                    }
+                }
+        }
     }
 }
