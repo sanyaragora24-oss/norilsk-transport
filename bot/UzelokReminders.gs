@@ -7,9 +7,8 @@
  * 2) Выполнить UzelokSendReminderTest (проверка Telegram).
  * 3) Выполнить UzelokScheduleReminderTest (проверка минутного триггера).
  *
- * Таблица: https://docs.google.com/spreadsheets/d/1mVDGzECeRolSbyZcLH3-OFesqK00CWnMW_XVH94KYWI/edit
+ * Использовать только в редакторе Apps Script, открытом из нужной таблицы.
  */
-var UZELOK_REMINDER_SHEET_ID = '1mVDGzECeRolSbyZcLH3-OFesqK00CWnMW_XVH94KYWI';
 var UZELOK_REMINDER_LOOKBACK_MINUTES = 240;
 var UZELOK_REMINDER_MAX_PER_TICK = 10;
 
@@ -22,7 +21,8 @@ function UzelokReminderConfig_() {
   if (!token || token.indexOf('СЮДА_') === 0 || !chat || !/^-?\d+$/.test(chat)) {
     throw new Error('Не найдены BOT_TOKEN и MY_CHAT_ID. Проверьте Script Properties текущего проекта; токены в лог не выводятся.');
   }
-  var ss = SpreadsheetApp.openById(UZELOK_REMINDER_SHEET_ID);
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('Скрипт должен быть привязан к таблице Узелок. Откройте его из Расширения → Apps Script.');
   var sh = ss.getSheetByName('Напоминания');
   if (!sh) throw new Error('Нет листа Напоминания');
   var h = sh.getRange(1, 1, 1, 4).getDisplayValues()[0].map(function (x) { return String(x).trim().toLowerCase(); });
