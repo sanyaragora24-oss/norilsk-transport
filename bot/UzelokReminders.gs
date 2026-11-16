@@ -27,7 +27,10 @@ function UzelokReminderConfig_() {
   if (!sh) throw new Error('Нет листа Напоминания');
   var h = sh.getRange(1, 1, 1, 4).getDisplayValues()[0].map(function (x) { return String(x).trim().toLowerCase(); });
   if (h.join('|') !== 'когда|текст|повтор|отправлено') throw new Error('Неожиданные колонки Напоминаний: ' + h.join('|'));
-  return { token: token, chat: chat, sheet: sh, timezone: ss.getSpreadsheetTimeZone() || 'Asia/Yekaterinburg', props: p };
+  var targetTimezone = String(p.getProperty('UZELOK_TIMEZONE') ||
+    ((typeof TZ !== 'undefined' && TZ) ? TZ : '') || ss.getSpreadsheetTimeZone() || '').trim();
+  if (!targetTimezone) throw new Error('Нет часового пояса. Задайте Script Property UZELOK_TIMEZONE, например Asia/Krasnoyarsk для Норильска.');
+  return { token: token, chat: chat, sheet: sh, timezone: targetTimezone, props: p };
 }
 
 function UzelokInstallReminders() {
